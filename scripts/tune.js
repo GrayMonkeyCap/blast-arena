@@ -100,9 +100,11 @@ function check(name, measured, expected, tolFrac, note = '') {
   check('throw range (solved for 8)', landed, R, 0.25, '(launch is 1.1u above floor)');
 }
 
-// ---- 5. grab spring: displaced held body settles at the hand, no orbiting
+// ---- 5. spring-damper utility: displaced body settles at anchor, no orbit
+// (gameplay grabs are rigid carries now; this validates the physics-core
+// springDamper for future constraint use)
 {
-  const k = CONFIG.grab.spring;
+  const k = { kp: 190, kd: 20, maxF: 280 };
   const t = { x: 1.5, z: 0, y: 0, vx: 0, vz: 0, vy: 0 };
   let settle = -1;
   for (let i = 0; i < 240; i++) {

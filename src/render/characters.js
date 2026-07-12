@@ -221,17 +221,6 @@ export class CharacterView {
       this.pose.add(hat);
     }
 
-    // mini flag on the back while carrying (the real flag mesh also rides
-    // along via FlagView; this pole sells the "strapped on" look)
-    this.backPole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 1.5, 6),
-      toonMat('#e8e4d8'),
-    );
-    this.backPole.position.set(0, 1.0, -0.34);
-    this.backPole.rotation.x = 0.35;
-    this.backPole.visible = false;
-    this.pose.add(this.backPole);
-
     // name tag + local-player ground marker
     this.name = makeNameSprite(p.name, team.color);
     this.name.position.y = 2.2;
@@ -273,20 +262,37 @@ export class CharacterView {
       // legs tuck mid-jump instead of cycling
       this.legL.rotation.x = airborne ? 0.55 : sw;
       this.legR.rotation.x = airborne ? -0.25 : -sw;
-      let armSw = -sw * 0.8;
-      this.armL.rotation.x = p.carryFlag ? -2.5 : armSw; // holds the pole
+      const armSw = -sw * 0.8;
+      this.armL.rotation.x = armSw;
       this.armR.rotation.x = -armSw;
-      if (p.heldBomb) this.armR.rotation.x = -1.15; // bomb held out front
-      if (p.heldPlayer) this.armL.rotation.x = -1.3; // wrangling someone
+      // anything grabbed — flag, bomb, or a whole player — is hoisted
+      // overhead with BOTH hands (BombSquad carry)
+      const holding = p.carryFlag || p.heldBomb || p.heldPlayer;
+      if (holding) {
+        this.armL.rotation.x = -2.75;
+        this.armR.rotation.x = -2.75;
+      }
       if (p.throwT > 0) {
-        // windup -> release over 0.35s
+        // big hurl: windup -> release over 0.35s (both arms if carrying)
         const t = 1 - p.throwT / 0.35;
-        this.armR.rotation.x = t < 0.4 ? lerp(0, -2.6, t / 0.4) : lerp(-2.6, 0.9, (t - 0.4) / 0.6);
+        const swing = t < 0.4 ? lerp(0, -2.6, t / 0.4) : lerp(-2.6, 0.9, (t - 0.4) / 0.6);
+        this.armR.rotation.x = swing;
+        if (holding) this.armL.rotation.x = swing;
       }
       if ((p.punchT ?? 0) > 0) {
-        // fast jab: snap back then shoot forward
+        // alternating jabs: right, left, right, left...
+        const arm = p.punchArm ? this.armL : this.armR;
         const t = 1 - p.punchT / 0.3;
-        this.armR.rotation.x = t < 0.3 ? lerp(0, -1.9, t / 0.3) : lerp(-1.9, 0.7, (t - 0.3) / 0.7);
+        arm.rotation.x = t < 0.3 ? lerp(0, -1.9, t / 0.3) : lerp(-1.9, 0.7, (t - 0.3) / 0.7);
+      }
+      // hoisted in someone's grip: dangle and flail until you fight back
+      if (p.heldBy && p.y > 0.6) {
+        this.legL.rotation.x = Math.sin(this.time * 16) * 0.8;
+        this.legR.rotation.x = -Math.sin(this.time * 16) * 0.8;
+        if (!(p.punchT > 0)) {
+          this.armL.rotation.x = -0.5 + Math.sin(this.time * 13) * 0.4;
+          this.armR.rotation.x = -0.5 - Math.sin(this.time * 13) * 0.4;
+        }
       }
       // upright <-> flat-on-back blend + running lean, jump-arc pitch & bob
       const airPitch = airborne ? clamp(-p.vy * 0.045, -0.4, 0.5) : 0;
@@ -312,8 +318,6 @@ export class CharacterView {
         if (c.userData.float) c.position.y = 0.34 + Math.sin(this.time * 3) * 0.04;
       }
     }
-
-    this.backPole.visible = !!p.carryFlag;
 
     // spawn-protection flicker
     g.visible = p.invuln > 0.05 ? Math.floor(this.time * 12) % 2 === 0 : true;

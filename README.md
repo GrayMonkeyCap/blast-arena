@@ -50,8 +50,8 @@ ticker, slow-motion and scene reset. Test all future physics changes here.
 | Move | WASD / arrows | left-side virtual joystick |
 | Aim | mouse | drag the 💣 button |
 | Throw — bomb, or whatever you hold (flag! player!) | left click | tap 💣 (quick) or drag + release (aimed) |
-| Punch | right click or F | 👊 button |
-| Grab — steal enemy flag, pick up live bombs, grab players | E | ✋ button |
+| Punch (fists alternate right/left) | right click or F | 👊 button |
+| Grab — steal flag, pick up bombs, hoist players overhead; press again to toss with your momentum | E | ✋ button |
 | Jump | Space | ⬆️ button |
 | Exit match | Esc | ✕ button |
 

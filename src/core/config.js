@@ -64,15 +64,14 @@ export const CONFIG = {
     liftFrac: 0.35, // fraction of j applied as upward impulse (launch!)
   },
 
-  // Grabbing players: a spring-damper constraint to the holder's hand
-  // (F = -kp·x - kd·ẋ, the report's ERP/CFM spring). Held players still
-  // wiggle, punch and can be thrown; hard hits break any grab.
+  // Grabbing players (BombSquad carry rules): a grabbed player is hoisted
+  // OVERHEAD like an item until they react — punch back for chip damage,
+  // or grab back to force a grounded mutual grapple (the pair moves by the
+  // average of both players' steering). Grab again = mild momentum toss;
+  // the throw button is the strong aimed hurl. Hard hits break any grip.
   grab: {
     playerRange: 1.45,
     breakImpulse: 20, // impulse that knocks things out of hands
-    spring: { kp: 190, kd: 20, maxF: 280 },
-    holdDist: 0.85,
-    maxDist: 2.7, // constraint snaps beyond this
     throwSpeed: 9,
     throwSpeedScale: 1.1, // thrown players inherit holder momentum
     holderSpeedMult: 0.85,

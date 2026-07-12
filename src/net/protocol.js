@@ -22,7 +22,7 @@ export function packState(st) {
       respawn: r2(p.respawn), invuln: r2(p.invuln), stumbleT: r2(p.stumbleT),
       carryFlag: p.carryFlag, heldBomb: p.heldBomb,
       heldPlayer: p.heldPlayer, heldBy: p.heldBy,
-      throwT: r2(p.throwT), punchT: r2(p.punchT),
+      throwT: r2(p.throwT), punchT: r2(p.punchT), punchArm: p.punchArm,
     })),
     bombs: st.bombs.map((b) => ({
       id: b.id, x: r2(b.x), z: r2(b.z), y: r2(b.y),

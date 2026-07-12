@@ -25,7 +25,7 @@
 
 import { clamp, norm2, angleLerp } from '../core/math.js';
 import {
-  integrateBody, collideBodies, applyImpulse, blastImpulse, springDamper, invMass,
+  integrateBody, collideBodies, applyImpulse, blastImpulse, invMass,
 } from './physics.js';
 
 const EMPTY_INPUT = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, throw: false, grab: false, punch: false, jump: false };
@@ -135,7 +135,7 @@ export function step(sim, inputs, dt) {
   for (const p of s.players) {
     updatePlayer(sim, p, inputs.get(p.id) ?? EMPTY_INPUT, dt, frozen);
   }
-  applyGrabSprings(sim, dt);
+  applyGrabs(sim, dt);
   playerCollisions(sim, s.players);
   updateBombs(sim, dt);
   sim.mode.tick(sim, dt);
@@ -174,8 +174,11 @@ function updatePlayer(sim, p, i, dt, frozen) {
   let speed = cfg.speed;
   if (p.carryFlag) speed *= cfg.carrySpeedMult;
   if (p.heldPlayer) speed *= sim.config.grab.holderSpeedMult;
+  // grapple control: hoisted overhead you're a passenger; in a MUTUAL
+  // grapple both wrestle at full strength (the pair moves by the average)
+  const mutualGrapple = p.heldBy && p.heldPlayer === p.heldBy;
   let ctrl = onGround ? 1 : cfg.airControl;
-  if (p.heldBy) ctrl *= 0.3; // struggling in someone's grip
+  if (p.heldBy && !mutualGrapple) ctrl *= 0.15;
   if (p.stumbleT > 0 || frozen) ctrl = 0;
   const acc = (mlen > 0.01 ? cfg.accel : cfg.friction) * ctrl;
   p.vx += clamp(m.x * mlen * speed - p.vx, -acc * dt, acc * dt);
@@ -259,7 +262,7 @@ function playerCollisions(sim, players) {
 //   MUTUAL: both players grounded in a wrestling lock, holding each other
 //     with equal strength — the pair moves by the AVERAGE of both players'
 //     steering, so movement is a genuine tug-of-war.
-function applyGrabs(sim) {
+function applyGrabs(sim, dt) {
   const done = new Set();
   for (const holder of sim.state.players) {
     if (!holder.heldPlayer || done.has(holder.id)) continue;
@@ -272,8 +275,12 @@ function applyGrabs(sim) {
       // mutual grapple lock
       done.add(holder.id);
       done.add(t.id);
-      const avx = (holder.vx + t.vx) / 2;
-      const avz = (holder.vz + t.vz) / 2;
+      // equal strength: the pair moves by the average of both muscles.
+      // Shuffle friction bleeds off inherited momentum so an opposed
+      // stalemate actually stalls instead of coasting.
+      const damp = Math.exp(-2.5 * dt);
+      const avx = ((holder.vx + t.vx) / 2) * damp;
+      const avz = ((holder.vz + t.vz) / 2) * damp;
       holder.vx = t.vx = avx;
       holder.vz = t.vz = avz;
       holder.y = 0; t.y = 0;
@@ -339,13 +346,30 @@ function doPunch(sim, p, i) {
   if (p.punchCd > 0) return;
   p.punchCd = cfg.cooldown;
   p.punchT = 0.3;
+  p.punchArm = p.punchArm ? 0 : 1; // alternate fists: right, left, right...
+  const invFist = 1 / cfg.fistMass;
+
+  // held in someone's grip (overhead or grapple): pummel the grabber
+  // directly — pure swing speed, chip damage until they let go or drop
+  if (p.heldBy) {
+    const holder = getP(sim, p.heldBy);
+    emit(sim, { t: 'punch', id: p.id, x: p.x, z: p.z });
+    if (holder && holder.state === 'alive') {
+      const j = ((1 + cfg.restitution) * cfg.swingSpeed) / (invFist + invMass(sim.mats.player));
+      const dmg = holder.team === p.team ? 0 : j * cfg.dmgPerImpulse;
+      const fdir = { x: Math.sin(holder.face), z: Math.cos(holder.face) };
+      damagePlayer(sim, holder, dmg, fdir.x * j * 0.35, fdir.z * j * 0.35, 0, 'punch');
+      emit(sim, { t: 'punchHit', id: p.id, target: holder.id, x: holder.x, z: holder.z, j: Math.round(j) });
+    }
+    return;
+  }
+
   const aim = norm2(i.ax || 0, i.az || 0);
   const dir = aim.len > 0.01 ? aim : { x: Math.sin(p.face), z: Math.cos(p.face) };
   p.face = Math.atan2(dir.x, dir.z);
   const fx = p.x + dir.x * cfg.range;
   const fz = p.z + dir.z * cfg.range;
   const vFist = cfg.swingSpeed + Math.hypot(p.vx, p.vz) + (p.y > 0.08 ? cfg.airBonus : 0);
-  const invFist = 1 / cfg.fistMass;
   emit(sim, { t: 'punch', id: p.id, x: fx, z: fz });
 
   for (const o of sim.state.players) {
@@ -431,19 +455,17 @@ function doThrow(sim, p, i) {
   p.throwT = 0.35;
 }
 
-// Grab: mode objects first (steal the enemy flag), then loose bombs, then
-// other players. Grab with a full hand sets the item down instead.
+// Grab: with something in hand, pressing grab again TOSSES it with mild
+// momentum (your speed and direction carry into it — LMB stays the strong
+// aimed throw). Empty-handed: mode objects first (steal the enemy flag),
+// then loose bombs, then other players. A player being held can grab their
+// own holder back, turning the carry into a mutual grapple.
 function doGrab(sim, p) {
   const cfg = sim.config;
-  if (p.carryFlag) {
-    sim.mode.dropCarried?.(sim, p, p.vx * 0.3, p.vz * 0.3); // set it down
+  if (p.carryFlag || p.heldBomb || p.heldPlayer) {
+    doToss(sim, p);
     return;
   }
-  if (p.heldPlayer) {
-    releasePlayer(sim, p);
-    return;
-  }
-  if (p.heldBomb) return;
 
   if (sim.mode.tryGrab?.(sim, p)) return;
 
@@ -461,20 +483,59 @@ function doGrab(sim, p) {
     return;
   }
 
-  // grab another player (they stay live: they wiggle, punch, get thrown)
+  // grab another player (they stay live: they punch back and get thrown)
   let bestP = null;
   let pd = cfg.grab.playerRange;
   for (const o of sim.state.players) {
-    if (o === p || o.state !== 'alive' || o.heldBy) continue;
-    if (Math.abs(o.y - p.y) > 1.2) continue;
+    if (o === p || o.state !== 'alive') continue;
+    const counterGrab = o.id === p.heldBy; // reaching down at your holder
+    if (o.heldBy && !(o.heldBy === p.id)) continue; // already in another grip
+    if (!counterGrab && Math.abs(o.y - p.y) > 1.2) continue;
     const d = Math.hypot(p.x - o.x, p.z - o.z);
     if (d < pd) { pd = d; bestP = o; }
   }
   if (bestP) {
     p.heldPlayer = bestP.id;
     bestP.heldBy = p.id;
-    emit(sim, { t: 'grabPlayer', id: p.id, target: bestP.id, x: p.x, z: p.z });
+    emit(sim, { t: 'grabPlayer', id: p.id, target: bestP.id, x: p.x, z: p.z, mutual: bestP.heldPlayer === p.id });
   }
+}
+
+// Light toss: release whatever is held — flag, bomb, or hoisted player —
+// with mild momentum inherited from your movement speed and direction.
+function doToss(sim, p) {
+  const dir = { x: Math.sin(p.face), z: Math.cos(p.face) };
+  const speed = 2.5 + Math.hypot(p.vx, p.vz) * 0.6; // mild, momentum-flavored
+  if (p.carryFlag) {
+    sim.mode.dropCarried?.(sim, p, dir.x * speed + p.vx * 0.3, dir.z * speed + p.vz * 0.3);
+  } else if (p.heldBomb) {
+    const b = sim.state.bombs.find((b) => b.id === p.heldBomb);
+    p.heldBomb = null;
+    if (b) {
+      b.holder = null;
+      b.x = p.x + dir.x * 0.6;
+      b.z = p.z + dir.z * 0.6;
+      b.y = p.y + 1.6;
+      b.vx = dir.x * speed + p.vx * 0.4;
+      b.vz = dir.z * speed + p.vz * 0.4;
+      b.vy = 3.2;
+    }
+    emit(sim, { t: 'throw', id: p.id, x: p.x, z: p.z });
+  } else if (p.heldPlayer) {
+    const t = getP(sim, p.heldPlayer);
+    // tossing out of a mutual grapple breaks BOTH grips
+    if (t && t.heldPlayer === p.id) releasePlayer(sim, t);
+    releasePlayer(sim, p);
+    if (t) {
+      t.vx = dir.x * speed + p.vx * 0.4;
+      t.vz = dir.z * speed + p.vz * 0.4;
+      t.vy = 3.5;
+      t.y = Math.max(t.y, 0.05);
+      t.stumbleT = Math.max(t.stumbleT, 0.5);
+      emit(sim, { t: 'playerThrow', id: p.id, target: t.id, x: t.x, z: t.z, mild: true });
+    }
+  }
+  p.throwT = 0.3;
 }
 
 // -------------------------------------------------------------------- bombs
@@ -492,10 +553,10 @@ function updateBombs(sim, dt) {
       if (!p || p.state !== 'alive') {
         b.holder = null;
       } else {
-        // carried in the hand
-        b.x = p.x + Math.sin(p.face) * 0.55;
-        b.z = p.z + Math.cos(p.face) * 0.55;
-        b.y = p.y + 0.85;
+        // hoisted overhead with both hands (BombSquad carry)
+        b.x = p.x + Math.sin(p.face) * 0.15;
+        b.z = p.z + Math.cos(p.face) * 0.15;
+        b.y = p.y + 2.05;
         b.vx = p.vx; b.vz = p.vz; b.vy = 0;
       }
     }

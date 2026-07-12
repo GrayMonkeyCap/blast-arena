@@ -119,10 +119,15 @@ research (`deep-research-report.md`, ODE-style dynamics):
   damage AND knockback, so momentum is the weapon. Impulse thresholds — not
   damage — decide grip-breaks (`grab.breakImpulse`) and stumbles
   (`player.stumbleImpulse`), including for player-player body slams.
-- **Grabs** are spring-damper joints (`F = -k_p·x - k_d·ẋ`,
-  `grab.spring`), the report's ERP/CFM constraint in explicit form; they
-  snap past `grab.maxDist`. Held players stay live and mutual grabs are two
-  springs fighting. Throws release with impulse + inherited momentum.
+- **Grabs** (BombSquad carry rules): a grabbed player is hoisted OVERHEAD
+  like an item and rides the grabber; anything held (flag/bomb/player) is
+  carried with both hands. The victim can pummel the grabber (chip damage)
+  or grab back, forcing a grounded MUTUAL grapple where the pair moves by
+  the average of both players' steering (equal strength; opposed inputs
+  stalemate, shuffle friction stops coasting). Grab again = mild
+  momentum-flavored toss; the throw button is the strong aimed hurl —
+  either from a mutual grapple breaks both grips. (`physics.springDamper`
+  remains a validated utility for future soft constraints.)
 - **Blasts** apply radial impulses with linear falloff; per-kind impulse
   magnitudes approximate pressure × exposed area.
 - **Stumble** approximates active-ragdoll balance loss (control lost

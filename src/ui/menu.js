@@ -45,10 +45,10 @@ export function createMenu(uiRoot, profile, { onPlayLocal, onPlayOnline, onPlayL
       <details class="help">
         <summary>How to play</summary>
         <div class="help-cols">
-          <div><b>⌨️ Keyboard</b><br>WASD / arrows — move · mouse — aim<br>Left click — throw (bomb, or whatever you hold)<br>Right click / F — punch<br>E — grab: steal flag, pick up live bombs, grab players<br>Space — jump</div>
+          <div><b>⌨️ Keyboard</b><br>WASD / arrows — move · mouse — aim<br>Left click — throw (bomb, or whatever you hold)<br>Right click / F — punch (fists alternate)<br>E — grab: steal flag, pick up live bombs, hoist players overhead · press again to toss<br>Space — jump</div>
           <div><b>📱 Touch</b><br>Left side — joystick<br>💣 tap quick-throw · drag to aim<br>👊 punch · ✋ grab · ⬆️ jump</div>
         </div>
-        <div class="help-rules">Steal the enemy flag and carry (or throw!) it to your base — but you can only score while your own flag is home. Touch your dropped flag to return it. Momentum is everything: running jump-punches hit like a truck, and everything you throw inherits your speed. Mind the open edges.</div>
+        <div class="help-rules">Steal the enemy flag and carry (or throw!) it to your base — but you can only score while your own flag is home. Touch your dropped flag to return it. Momentum is everything: running jump-punches hit like a truck, and everything you throw inherits your speed. Grabbed someone? They ride overhead until you toss (grab) or hurl (throw) them — but they can punch your hp down, or grab you back into a ground grapple where movement is a two-player tug-of-war. Mind the open edges.</div>
       </details>
     </div>
   `;

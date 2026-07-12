@@ -87,8 +87,9 @@ export class FlagView {
 
     this.tilt = clamp(this.tilt + (carried ? 4 : -4) * dt, 0, 1);
     const bob = dropped && f.y <= 0.05 ? Math.abs(Math.sin(time * 3.2)) * 0.1 : 0;
-    this.group.position.set(f.x, f.y + (carried ? 0.45 : 0.12) + bob, f.z);
-    this.group.rotation.x = lerp(0, -0.55, this.tilt); // lean back when strapped on
+    // carried flags ride overhead in both hands (matches the carry pose)
+    this.group.position.set(f.x, f.y + (carried ? 2.0 : 0.12) + bob, f.z);
+    this.group.rotation.x = lerp(0, -0.15, this.tilt); // slight overhead tilt
     // in flight it pitches with its arc; at rest / home it stays upright
     const flying = !carried && f.y > 0.1;
     this.group.rotation.z = flying ? clamp(-f.vx * 0.03, -0.4, 0.4) : 0;
