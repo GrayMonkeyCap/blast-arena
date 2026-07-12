@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "blast-arena",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["server/server.js"],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
       "port": 8090
     }
   ]
