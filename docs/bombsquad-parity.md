@@ -155,11 +155,61 @@ threshold). The old KO-means-dead flow stays for hp ≤ 0.
 | Flag body | cylinder, mass r 0.3 × h 1.0, density 1 (light) | `materials.flag mass 1.0` |
 | Time limit | none by default (configurable) | 180 s (product choice) |
 
+## Powerups (powerupbox.py, powerup.py, spaz.py, spazfactory.py, bomb.py)
+
+Spawn system (`config.powerups`, boxes live in `sim.state.powerups`):
+
+| Mechanic | BombSquad source | Blast Arena |
+|---|---|---|
+| Wave interval | `DEFAULT_POWERUP_INTERVAL = 8.0`, first wave at start | `interval 8`, `puWave` starts at 0 |
+| Stagger | `_standard_drop_powerups`: `bs.Timer(i * 0.4, …)` per point | `stagger 0.4` via `puPend` queue |
+| Spawn points | `map.powerup_spawn_points` | `level.powerupSpawns` (foundry 6, dojo 3) |
+| Box expiry | flash at interval−2.5, die at interval−1.0 | `boxFlash 5.5` / `boxLife 7.0` |
+| Distribution | triple 3, ice 3, punch 3, impact 3, mines 2, sticky 3, shield 2, health 1, curse 1 | same weights (`distribution`) |
+| Mercy rule | a curse box is always followed by a health box | `pickPowerupType` (`sim.lastPowerup`) |
+| Collection | touch (`powerup_accept_material`) | body-contact check, instant grant |
+| Box vs. hits | dies to any non-punch hit; punches just shove it | blasts destroy boxes; fists apply impulse |
+| Wear-off | `POWERUP_WEAR_OFF_TIME 20000` ms, flash last 2s | `wearOff 20`, visuals strobe last 2s |
+| Death | a new spaz spawns clean | `clearPowerups()` on KO/respawn/reset |
+
+Effects (÷10 on all hp-scale numbers):
+
+- **Boxing gloves** — cooldown 400→**300 ms**, `punch_power_scale`
+  1.2→**1.4** (both damage and cap scale by 1.4/1.2 ≈ ×1.17; sprint punch
+  41→48). `powerups.gloves`.
+- **Shield** — **650 hp → 65**; absorbs damage AND knockback entirely (the
+  dry-run impulse in spaz.py is never applied). On the breaking hit, only
+  damage beyond hp+spillover (**500 → 50**) leaks through, scaled by
+  `leftover/damage` exactly like `shield_leftover_ratio`. Blocks freezing.
+  No decay (BombSquad only decays it in special modes).
+- **Triple bombs** — bomb count 3 for 20s (`p.bombCount`); land mines are
+  separate ammo and never expire (`land_mine_count`: +3 capped at 3,
+  pulled before normal bombs exactly like `drop_bomb`).
+- **Bomb types** (bomb.py `Blast`): radius multipliers ice ×1.2 /
+  impact ×0.7 / mine ×0.7 on the base 2.0 (ours carry the +0.5 body-reach
+  allowance → 2.9/1.9/1.9); magnitude ice ×0.5, mine ×2.5. Impact bombs
+  arm at 0.2s and detonate on ANY contact (owner excluded) with a 20s
+  fallback fuse; land mines arm at 1.25s and trigger on any body — owner
+  included; sticky bombs splat where they land and stick to whoever they
+  touch, riding them until the 3s fuse pops.
+- **Ice / freezing** — ice blasts freeze after their (halved) damage
+  lands; frozen = zero control for 5s; a hit ≥ **200 units → 20 hp** (or a
+  lethal one) shatters outright. Shield/invincibility block the freeze.
+- **Med-pack** — full heal, and the only cure for the curse.
+- **Curse** — 5s countdown (`curse_time 5.0`), then `curse_explode()`: the
+  player dies and a normal-magnitude blast (radius 3.0 → ours 3.5) goes
+  off at their position.
+
+Bots weren't powerup-aware in BombSquad either, but ours get the basics:
+a cursed bot sprints for a med-pack, a hurt one detours for a close one,
+brawlers snag nearby boxes (never the curse), and everyone gives armed
+land mines a wide berth.
+
 ## Known remaining gaps (not yet 1:1)
 
-- **Powerups** — boxing gloves, shields, sticky/ice/impact bombs, land
-  mines, TNT crates, med-packs, curse. A large system (spawn schedule,
-  per-type bombs, shield hp 650 with spillover); not implemented.
+- **TNT crates** — the separate `_tnt_spawners` map feature (blast ×2.0
+  magnitude, ×1.45 radius, secondary explosion); the powerup boxes above
+  are all implemented.
 - **Spin punches** — we have no free spinning, so the angular-momentum
   damage term is folded into the speed curve. Max gloveless damage is
   slightly lower than a perfect BombSquad spin punch.
@@ -174,8 +224,13 @@ threshold). The old KO-means-dead flow stays for hp ≤ 0.
 ## How to re-verify
 
 `npm run tune` asserts the headline numbers (sprint punch ≈ 41, standing
-jab 4, point-blank blast lethal + uniform Δv, sprint throw ≈ 2× standing).
-`npm run smoke` plays a full bot match headlessly (bombs are pulled, cooked
-and thrown; knockouts and impacts fire). The Physics Lab (menu → 🧪) is the
-hands-on space: the lab panel now logs `knockout`, `impact dmg=…` and
-`bomb out` events with per-hit damage.
+jab 4, gloves ×1.4/1.2, shield spillover math, point-blank blast lethal +
+uniform Δv, sprint throw ≈ 2× standing). `npm run smoke` plays a full bot
+match headlessly (bombs are pulled, cooked and thrown; knockouts, impacts
+and powerup pickups fire) and then walks every powerup through a
+deterministic harness (grants, 20s wear-offs, shield absorb + spillover
+kill, curse KO, med-pack cure, freeze → shatter, impact-on-landing,
+mine-on-touch, sticky attach). The Physics Lab (menu → 🧪) is the hands-on
+space: powerups drop on the dojo's three pads, and the lab panel logs
+`powerup`, `shieldHit`, `freeze`/`shatter`, `curse` and `mineArm` events
+alongside the per-hit damage telemetry.

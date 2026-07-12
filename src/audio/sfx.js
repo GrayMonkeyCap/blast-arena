@@ -95,6 +95,15 @@ export function createSfx() {
     },
     lose() { [392, 330, 262].forEach((f, i) => osc('triangle', f, f, 0.22, 0.16, i * 0.16)); },
     click() { osc('square', 1500, 1200, 0.04, 0.08); },
+    powerup() { [660, 880].forEach((f, i) => osc('triangle', f, f * 1.2, 0.09, 0.2, i * 0.06)); },
+    wearOff() { osc('triangle', 700, 420, 0.16, 0.14); },
+    shieldHit(v = 1) { osc('sine', 900, 500, 0.12, 0.2 * v); noise(0.05, 'highpass', 2500, 4500, 0.1 * v); },
+    shieldDown(v = 1) { osc('sawtooth', 500, 120, 0.3, 0.25 * v); noise(0.2, 'highpass', 1800, 4000, 0.15 * v); },
+    freeze(v = 1) { [1320, 1760].forEach((f, i) => osc('sine', f, f * 0.8, 0.14, 0.14 * v, i * 0.05)); },
+    shatter(v = 1) { noise(0.3, 'highpass', 3000, 7000, 0.35 * v); osc('sine', 1500, 400, 0.12, 0.12 * v); },
+    curse() { osc('sawtooth', 130, 65, 0.6, 0.3); osc('sine', 98, 60, 0.6, 0.2); },
+    mineArm(v = 1) { osc('square', 950, 950, 0.05, 0.12 * v); },
+    stick(v = 1) { noise(0.09, 'lowpass', 900, 300, 0.2 * v); },
   };
 
   return {

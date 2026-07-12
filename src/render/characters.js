@@ -201,6 +201,7 @@ export class CharacterView {
       const tip = new THREE.Mesh(new THREE.SphereGeometry(handR, 10, 8), handMat);
       tip.position.y = -(len + r * 2);
       g.add(seg, tip);
+      g.userData.tip = tip;
       return g;
     };
     this.armL = limb(0.105, 0.3, jersey, skin, 0.13);
@@ -212,6 +213,38 @@ export class CharacterView {
     this.legL.position.set(-0.17, 0.42, 0);
     this.legR.position.set(0.17, 0.42, 0);
     this.pose.add(this.armL, this.armR, this.legL, this.legR);
+    // fists swell into red boxing gloves while the powerup is live
+    this.hands = [this.armL.userData.tip, this.armR.userData.tip];
+    this.skinMat = skin;
+    this.gloveMat = toonMat('#e0372a');
+
+    // --- powerup add-ons (driven by sim state each frame) ---
+    // energy shield: a translucent bubble that dims as it takes hits
+    this.shieldMat = new THREE.MeshBasicMaterial({
+      color: '#7a5cff', transparent: true, opacity: 0.3,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    this.shield = new THREE.Mesh(new THREE.SphereGeometry(1.05, 18, 12), this.shieldMat);
+    this.shield.position.y = 0.95;
+    this.shield.visible = false;
+    this.group.add(this.shield);
+    // frozen solid: an ice casing around the body
+    this.iceMat = new THREE.MeshToonMaterial({
+      color: '#bfe8ff', gradientMap: toonGradient(),
+      transparent: true, opacity: 0.55,
+    });
+    this.ice = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.95, 1.0), this.iceMat);
+    this.ice.position.y = 0.95;
+    this.ice.visible = false;
+    this.pose.add(this.ice);
+    // cursed: a dark aura that pulses faster as the countdown runs out
+    this.curseMat = new THREE.MeshBasicMaterial({
+      color: '#3d1450', transparent: true, opacity: 0.4, depthWrite: false,
+    });
+    this.curse = new THREE.Mesh(new THREE.SphereGeometry(0.95, 16, 12), this.curseMat);
+    this.curse.position.y = 0.95;
+    this.curse.visible = false;
+    this.group.add(this.curse);
 
     // cosmetic hat
     const hat = buildHat(p.cos?.hat);
@@ -321,6 +354,32 @@ export class CharacterView {
       }
     }
 
+    // --- powerup add-ons ---
+    // boxing gloves: fists swell and go red; strobe for the last 2s
+    const glovesT = p.glovesT ?? 0;
+    const gloved = glovesT > 0 && !(glovesT < 2 && Math.floor(this.time * 8) % 2);
+    for (const h of this.hands) {
+      h.material = gloved ? this.gloveMat : this.skinMat;
+      const hs = gloved ? 1.7 : 1;
+      h.scale.set(hs, hs, hs);
+    }
+    // shield bubble: opacity tracks remaining shield hp, with a slow shimmer
+    const shieldHp = p.shieldHp ?? 0;
+    this.shield.visible = shieldHp > 0;
+    if (this.shield.visible) {
+      this.shieldMat.opacity = 0.14 + 0.3 * Math.min(1, shieldHp / 65) + Math.sin(this.time * 5) * 0.04;
+      this.shield.rotation.y += dt * 0.7;
+    }
+    // frozen: encased in ice (and rigid — the sim zeroes control anyway)
+    this.ice.visible = (p.frozenT ?? 0) > 0;
+    // cursed: dark pulse, frantic near zero
+    const curseT = p.curseT ?? 0;
+    this.curse.visible = curseT > 0;
+    if (this.curse.visible) {
+      const s = 1 + 0.12 * Math.sin(this.time * (4 + (5 - curseT) * 5));
+      this.curse.scale.set(s, s, s);
+    }
+
     // spawn-protection flicker
     g.visible = p.invuln > 0.05 ? Math.floor(this.time * 12) % 2 === 0 : true;
   }
@@ -328,6 +387,9 @@ export class CharacterView {
   dispose() {
     this.name.material.map?.dispose();
     this.name.material.dispose();
+    this.shieldMat.dispose();
+    this.iceMat.dispose();
+    this.curseMat.dispose();
     this.scene.remove(this.group);
   }
 }

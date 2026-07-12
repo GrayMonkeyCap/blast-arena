@@ -34,6 +34,15 @@ function interpState(a, b, t) {
       ? { ...bb, x: lerp(aa.x, bb.x, t), z: lerp(aa.z, bb.z, t), y: lerp(aa.y, bb.y, t) }
       : { ...bb };
   });
+  if (a.powerups && b.powerups) {
+    const puA = new Map(a.powerups.map((x) => [x.id, x]));
+    out.powerups = b.powerups.map((u) => {
+      const aa = puA.get(u.id);
+      return aa
+        ? { ...u, x: lerp(aa.x, u.x, t), z: lerp(aa.z, u.z, t), y: lerp(aa.y, u.y, t) }
+        : { ...u };
+    });
+  }
   if (a.flags && b.flags) {
     out.flags = {};
     for (const team of Object.keys(b.flags)) {

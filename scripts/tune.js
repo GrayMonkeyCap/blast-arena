@@ -150,6 +150,24 @@ function check(name, measured, expected, tolFrac, note = '') {
   check('sprint punch ≈ 40% hp (BombSquad)', dRun, 41, 0.15, '(tutorial: running punch ≈ 40%)');
   check('standing jab stays a tickle', dStand, c.dmgBase, 0.01);
   check('sprint punch knocks out', dRun * k.unitsPerDamage - k.baseUnits >= 1 ? 1 : 0, 1, 0.01, '(a clean running hit floors you)');
+
+  // boxing gloves powerup: same momentum curve × punch_power_scale
+  // (spazfactory.py: 1.2 → 1.4 with gloves) on a 300ms cooldown
+  const gl = CONFIG.powerups.gloves;
+  const dRunGloves = Math.min(c.dmgCap * gl.powerScale, (c.dmgBase + c.dmgPerSpeed * CONFIG.player.runSpeed) * gl.powerScale);
+  console.log(`      punch sprint+gloves    v= ${CONFIG.player.runSpeed.toFixed(1)}  dmg= ${dRunGloves.toFixed(0)}  cooldown=${gl.cooldown}s (vs ${c.cooldown}s)`);
+  check('gloves scale punches 1.2→1.4', dRunGloves / dRun, 1.4 / 1.2, 0.01, '(BombSquad punch_power_scale)');
+}
+
+// ---- 6b. shield spillover math (spaz.py): the shield eats damage AND
+// knockback whole; only the breaking hit's overshoot past hp+spillover
+// (650+500 on the 1000 scale, 65+50 on ours) leaks through to the player.
+{
+  const sh = CONFIG.powerups.shield;
+  const leak = (D) => Math.max(0, D - sh.hp - sh.spillover);
+  console.log(`      shield: hp=${sh.hp} spillover=${sh.spillover} — hit 60 leaks ${leak(60)}, hit 100 leaks ${leak(100)}, hit 200 leaks ${leak(200)}`);
+  check('shield swallows a lethal blast whole', leak(CONFIG.bomb.maxDamage), 0, 0.01, '(point-blank bomb ≤ hp+spillover)');
+  check('shield spillover leaks the overshoot', leak(200), 200 - sh.hp - sh.spillover, 0.01, '(mine-class hits get through)');
 }
 
 // ---- 7. blast table (BombSquad): linear damage falloff to ZERO at the

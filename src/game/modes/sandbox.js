@@ -324,8 +324,13 @@ function makeSandbox(variant) {
     // recalled — no dangling references).
     resetScene(sim) {
       sim.state.bombs = [];
+      sim.state.powerups = [];
+      sim.state.puPend = [];
       for (const p of sim.state.players) {
         p.carryFlag = null; p.heldBomb = null; p.heldPlayer = null; p.heldBy = null;
+        p.shieldHp = 0; p.glovesT = 0; p.frozenT = 0; p.curseT = 0;
+        p.mines = 0; p.bombKind = 'normal'; p.bombKindT = 0;
+        p.bombCount = sim.config.bomb.perPlayer; p.tripleT = 0;
         if (!p.bot) continue;
         const s = sim.level.spawns[p.team][0];
         p.x = s.x; p.z = s.z; p.y = 0;

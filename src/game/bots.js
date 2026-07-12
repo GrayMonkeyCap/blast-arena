@@ -62,6 +62,7 @@ export function createBotBrain(id, rng = Math.random) {
       let target = null;
       let throwAt = null;
       let wantGrabFlag = false;
+      let brawling = false;
       if (me.carryFlag) {
         target = myBase; // run it home (and hold there if our flag is out)
       } else if (myFlag.st === 'carry') {
@@ -83,22 +84,46 @@ export function createBotBrain(id, rng = Math.random) {
         const e = nearest(enemies, me);
         target = e ?? myBase;
         throwAt = e;
+        brawling = true;
       }
       if (!throwAt) {
         const e = nearest(enemies, me);
         if (e && Math.hypot(e.x - me.x, e.z - me.z) < 10.5) throwAt = e;
       }
 
+      // --- powerups: a cursed bot sprints for a med-pack (the only cure),
+      // a hurt one detours for a close med-pack, and a brawler snags any
+      // nearby box — except the curse, which bots know better than to touch
+      const boxes = s.powerups ?? [];
+      if (!me.carryFlag && boxes.length) {
+        const health = nearest(boxes.filter((u) => u.kind === 'health'), me);
+        if (me.curseT > 0 && health) {
+          target = health;
+          throwAt = null;
+          wantGrabFlag = false;
+        } else if (me.hp < 45 && health && Math.hypot(health.x - me.x, health.z - me.z) < 14) {
+          target = health;
+        } else if (brawling) {
+          const grab = nearest(boxes.filter((u) => u.kind !== 'curse'), me);
+          if (grab && Math.hypot(grab.x - me.x, grab.z - me.z) < 8) target = grab;
+        }
+      }
+
       // --- steering
       let dir = norm2(target.x - me.x, target.z - me.z);
       // flinch away from bombs about to pop — deliberately late/imperfect,
-      // a bot that always escapes the blast radius is no fun to fight
+      // a bot that always escapes the blast radius is no fun to fight.
+      // Armed land mines get a permanent wide berth instead.
+      const kinds = sim.config.bomb.kinds;
       for (const b of s.bombs) {
-        if (b.holder || b.fuse > 0.6) continue;
+        if (b.holder || b.stuckTo) continue;
+        const mine = b.kind === 'mine';
+        if (mine ? b.arm > 0 : (b.fuse == null || b.fuse > 0.6)) continue;
         const dx = me.x - b.x;
         const dz = me.z - b.z;
         const d = Math.hypot(dx, dz);
-        if (d < sim.config.bomb.blastRadius && d > 0.01) {
+        const r = (kinds[b.kind]?.radius ?? sim.config.bomb.blastRadius) + (mine ? 0.6 : 0);
+        if (d < r && d > 0.01) {
           dir.x += (dx / d) * 2.2;
           dir.z += (dz / d) * 2.2;
         }

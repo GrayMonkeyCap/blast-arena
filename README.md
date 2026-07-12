@@ -82,6 +82,10 @@ ticker, slow-motion and scene reset. Test all future physics changes here.
 - **Grab players**: they dangle overhead — still punching (one clean
   pummel forces the drop), still able to grab you back — until you throw
   them (toward the void, ideally).
+- **Powerups** drop in waves — walk into a box to take it: boxing gloves,
+  an energy shield, triple / ice / impact / sticky bombs, land mines ×3,
+  med-packs... and the **curse** (5 seconds to find a med-pack, or boom).
+  Carried powerups wear off after 20s; dying loses everything.
 
 ## What's in the box
 
@@ -92,6 +96,9 @@ ticker, slow-motion and scene reset. Test all future physics changes here.
   animations, blinking, X-eyes) with team kits and cosmetic hats/skins.
 - Physics bombs with burning fuses, escalating danger pulse, chain
   reactions, knockback, camera shake, scorch marks.
+- The full BombSquad powerup set: spinning pickup crates, shield bubbles,
+  swollen red boxing-glove fists, frozen-solid statues that shatter,
+  cursed players pulsing dark until they pop.
 - 2v2 online multiplayer (server-authoritative, bots fill empty slots,
   scales via `teamSize` in `src/core/config.js`); bots steal, escort,
   chase thieves, return flags and throw momentum punches.

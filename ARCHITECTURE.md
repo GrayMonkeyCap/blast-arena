@@ -57,10 +57,11 @@ WebAudio-synthesized) and HUD messages hang off the same event stream.
 ## Extension recipes
 
 **Add a level** — create `src/content/levels/<id>.js` (bounds, `solids[]`
-boxes with a `kind` for styling, bases, spawns, flag position, decor), then
-register it in `levels/index.js`. Collision *and* rendering derive from the
-same `solids` list, so the level plays and draws correctly with no other
-changes. Box `h` matters: bombs and launched players fly over low cover.
+boxes with a `kind` for styling, bases, spawns, flag position,
+`powerupSpawns[]` drop points, decor), then register it in
+`levels/index.js`. Collision *and* rendering derive from the same `solids`
+list, so the level plays and draws correctly with no other changes. Box `h`
+matters: bombs and launched players fly over low cover.
 
 **Add a game mode** — create `src/game/modes/<id>.js` exporting hooks
 `{ id, init(sim), tick(sim, dt), onKO(sim, p), tryGrab?(sim, p),
@@ -146,6 +147,16 @@ underlying ODE-style dynamics):
   lethal), and a mass-normalized velocity kick — the same Δv for every
   body, vertical component exaggerated (`blastKick`). Bombs caught in a
   blast cook off 0.1–0.2s later (chains); punches shove but don't trigger.
+- **Powerups** (BombSquad's full box set, `config.powerups` +
+  `docs/bombsquad-parity.md`): boxes drop on `level.powerupSpawns` every
+  8s and are collected by touch. Boxing gloves (300ms cooldown, ×1.17
+  punches), an energy shield (65 hp, eats damage AND knockback, spillover
+  past 50 leaks through), triple bombs, ice bombs (freeze — a hard hit
+  shatters), impact bombs (detonate on contact), sticky bombs (ride their
+  victim), land mines (×3 ammo, arm at 1.25s, trigger on touch),
+  med-packs, and the curse (5s, then boom, curable only by a med-pack).
+  Carried powerups wear off after 20s; death loses everything. Bots seek
+  med-packs when cursed or hurt and give armed mines a wide berth.
 
 `npm run tune` runs the physics against analytic predictions (bounce peak
 = e²h, stop time = v/μg, momentum conservation, throw ranges, punch/blast
@@ -188,11 +199,20 @@ meter (hit → rest distance, airtime, peak height), an event ticker
 and **scene reset** buttons. Lab sessions are endless (no timer/score) and
 use `makeLabConfig()` overrides (fast respawn, minimal spawn protection).
 
+Powerup boxes drop on the dojo's three pads in both variants, so every
+box type can be tried hands-on; the event ticker logs `powerup`,
+`shieldHit`/`shieldDown`, `freeze`/`thaw`/`shatter`, `curse` and
+`mineArm` as they happen.
+
 Automated layers underneath:
 
 - `npm run tune` — the physics core vs analytic theory (bounce = e²h,
-  stop time = v/μg, momentum conservation, throw range, spring settle).
-- `npm run smoke` — headless 4-minute CTF bot match + lab-duel and
+  stop time = v/μg, momentum conservation, throw range, spring settle,
+  glove punch scaling, shield spillover math).
+- `npm run smoke` — headless 4-minute CTF bot match (asserts powerups
+  drop and get picked up), a deterministic per-powerup harness (grants,
+  wear-offs, shield absorb/spillover, curse KO, med-pack cure,
+  freeze → shatter, impact/mine/sticky triggers), + lab-duel and
   lab-doll wiring checks (fighter fights; doll stands, ragdolls, returns).
 - `window.__blast` in-page debug hook: `{ transport, input, world, step,
   renderer }`; `step(now)` pumps one full frame manually (used for
