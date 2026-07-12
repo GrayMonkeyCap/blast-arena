@@ -10,7 +10,7 @@
 import { clamp, norm2, circlePushOut } from '../core/math.js';
 import { otherTeam } from '../core/config.js';
 
-const ZERO = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, throw: false, grab: false, punch: false, jump: false };
+const ZERO = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, run: 1, throw: false, grab: false, punch: false, jump: false };
 
 const nearest = (list, to) => {
   let best = null;
@@ -118,10 +118,32 @@ export function createBotBrain(id, rng = Math.random) {
       const ahead = { x: clamp(me.x + dir.x * 2, -hw, hw), z: clamp(me.z + dir.z * 2, -hd, hd) };
       dir = norm2(ahead.x - me.x, ahead.z - me.z);
 
-      const input = { mx: dir.x, mz: dir.z, ax: 0, az: 0, ad: 7, throw: false, grab: false, punch: false, jump: false };
+      const input = { mx: dir.x, mz: dir.z, ax: 0, az: 0, ad: 7, run: 1, throw: false, grab: false, punch: false, jump: false };
+
+      // --- holding a lit bomb: cook it a beat, then throw at the target's
+      // predicted position — and panic-throw the moment the fuse runs short
+      if (me.heldBomb) {
+        const bomb = s.bombs.find((b) => b.id === me.heldBomb);
+        const fuse = bomb ? bomb.fuse : 0;
+        const at = throwAt ?? nearest(enemies, me);
+        const dd = at ? Math.hypot(at.x - me.x, at.z - me.z) : 99;
+        if (fuse < 2.5 || dd < 4 || !at) {
+          const leadT = Math.max(0.3, fuse - 0.4);
+          const px = clamp((at?.x ?? me.x + dir.x * 8) + (at?.vx || 0) * leadT, -hw, hw);
+          const pz = clamp((at?.z ?? me.z + dir.z * 8) + (at?.vz || 0) * leadT, -hd, hd);
+          const a = Math.atan2(px - me.x, pz - me.z) + (Math.random() * 2 - 1) * this.aimErr;
+          input.ax = Math.sin(a);
+          input.az = Math.cos(a);
+          input.ad = Math.hypot(px - me.x, pz - me.z);
+          input.throw = true;
+          this.cool = 0.8 + (Math.random() * 1.6) / this.aggro;
+        }
+        return input; // no punching/grabbing with a bomb overhead
+      }
 
       // --- melee: momentum punch when an enemy is in fist range
-      if (me.punchCd <= 0) {
+      // (BombSquad: no swinging while carrying anything)
+      if (me.punchCd <= 0 && !me.carryFlag && !me.heldPlayer) {
         const e = nearest(enemies, me);
         if (e && Math.hypot(e.x - me.x, e.z - me.z) < 1.55) {
           const a = norm2(e.x - me.x, e.z - me.z);
@@ -131,22 +153,13 @@ export function createBotBrain(id, rng = Math.random) {
         }
       }
 
-      // --- bombing: aim where the target will be when the bomb DETONATES
-      // (fuse keeps burning after landing), not where they are now
-      if (!input.punch && throwAt && !me.carryFlag && me.throwCd <= 0 && this.cool <= 0) {
-        const leadT = sim.config.bomb.fuse * 0.8;
-        const px = clamp(throwAt.x + (throwAt.vx || 0) * leadT, -hw, hw);
-        const pz = clamp(throwAt.z + (throwAt.vz || 0) * leadT, -hd, hd);
-        const tx = px - me.x;
-        const tz = pz - me.z;
-        const dd = Math.hypot(tx, tz);
-        if (dd > 2.2 && dd < sim.config.bomb.maxRange) {
-          const a = Math.atan2(tx, tz) + (Math.random() * 2 - 1) * this.aimErr;
-          input.ax = Math.sin(a);
-          input.az = Math.cos(a);
-          input.ad = dd;
+      // --- bombing: pull out a lit bomb when a target is in throwing range
+      // (it gets aimed and thrown on a later think, once it's in hand)
+      if (!input.punch && throwAt && !me.carryFlag && !me.heldPlayer && this.cool <= 0) {
+        const live = s.bombs.some((b) => b.owner === me.id);
+        const dd = Math.hypot(throwAt.x - me.x, throwAt.z - me.z);
+        if (!live && dd > 2.2 && dd < 13) {
           input.throw = true;
-          this.cool = 0.8 + (Math.random() * 1.6) / this.aggro;
         }
       }
 

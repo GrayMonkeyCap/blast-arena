@@ -19,7 +19,7 @@ export function packState(st) {
       x: r2(p.x), z: r2(p.z), y: r2(p.y),
       vx: r2(p.vx), vz: r2(p.vz), face: r2(p.face), spd: r2(p.spd),
       hp: Math.round(p.hp), state: p.state,
-      respawn: r2(p.respawn), invuln: r2(p.invuln), stumbleT: r2(p.stumbleT),
+      respawn: r2(p.respawn), invuln: r2(p.invuln), knockT: r2(p.knockT),
       carryFlag: p.carryFlag, heldBomb: p.heldBomb,
       heldPlayer: p.heldPlayer, heldBy: p.heldBy,
       throwT: r2(p.throwT), punchT: r2(p.punchT), punchArm: p.punchArm,

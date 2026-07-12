@@ -67,8 +67,10 @@ function playSfx(events, myId, myPos) {
       case 'bounce': sfx.play('bounce', spatial(ev) * 0.7); break;
       case 'punch': sfx.play('punch', spatial(ev)); break;
       case 'punchHit': sfx.play('punchHit', spatial(ev)); break;
+      case 'impact': sfx.play('bounce', spatial(ev)); break;
+      case 'knockout': sfx.play('punchHit', spatial(ev) * 0.6); break;
       case 'jump': if (ev.id === myId) sfx.play('jump'); break;
-      case 'grabBomb': sfx.play('grab'); break;
+      case 'grabBomb': case 'bombOut': sfx.play('grab'); break;
       case 'grabPlayer': sfx.play('grabPlayer'); break;
       case 'playerThrow': sfx.play('playerThrow', spatial(ev)); break;
       case 'flagSteal': sfx.play('flagTaken'); break;

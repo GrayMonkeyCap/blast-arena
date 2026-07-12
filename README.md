@@ -8,7 +8,9 @@ offline; online multiplayer ships with a zero-dependency Node server.
 
 Momentum is the whole game: running feeds punch damage, throw distance and
 knockback; jumps preserve it; and everything — bombs, flags, even grabbed
-players — is a physics object you can hurl downfield.
+players — is a physics object you can hurl downfield. Movement and combat
+are matched value-for-value against BombSquad's open-source engine — see
+[docs/bombsquad-parity.md](docs/bombsquad-parity.md) for the derivations.
 
 ![tech](https://img.shields.io/badge/three.js-r170-blue) — no build step,
 no runtime CDN, no npm dependencies (three.js is vendored).
@@ -47,31 +49,39 @@ ticker, slow-motion and scene reset. Test all future physics changes here.
 
 | Action | PC | Touch |
 |---|---|---|
-| Move | WASD / arrows | left-side virtual joystick |
+| Move (keys sprint; hold Shift to walk) | WASD / arrows | left joystick — push to the rim to run |
 | Aim | mouse | drag the 💣 button |
-| Throw — bomb, or whatever you hold (flag! player!) | left click | tap 💣 (quick) or drag + release (aimed) |
-| Punch (fists alternate right/left) | right click or F | 👊 button |
-| Grab — steal flag, pick up bombs, hoist players overhead; press again to toss with your momentum | E | ✋ button |
+| Bomb — pull out a LIT bomb (fuse burns in your hands!); press again to throw it. Throws whatever you hold (flag! player!) | left click | tap 💣, tap again (or drag + release) to throw |
+| Punch (fists alternate; can't swing while holding something) | right click or F | 👊 button |
+| Grab — steal flag, pick up bombs, hoist players overhead; press again to throw | E | ✋ button |
 | Jump | Space | ⬆️ button |
 | Exit match | Esc | ✕ button |
 
 ## The rules (BombSquad CTF)
 
-- **Steal** the enemy flag with grab; **score** by bringing it to your base
-  — but only while your own flag is home.
+- **Steal** the enemy flag with grab; **score** by getting it into your
+  base — carried or *thrown in* — but only while your own flag is home.
 - **Touch** your own dropped flag to return it instantly; untouched flags
   fly home after 30 seconds. Flags that fall off the map return at once.
 - The flag is a **physics object**: it slides, bounces, gets punched and
   blast-shoved, and its carrier can **throw it downfield** (it inherits
-  your running momentum — the classic flag-relay play).
-- **Punch power = your momentum.** A standing jab tickles; a running jump
-  punch launches people. A hard enough hit staggers the target and knocks
-  the flag (or a held bomb, or a grabbed player) right out of their hands.
-- **Grab players**: they dangle from your hand — still struggling, still
-  punching — until you throw them (toward the void, ideally). Mutual grabs
-  are legal and exactly as chaotic as they sound.
-- Live bombs can be grabbed and re-thrown; fuses (~3s) keep burning, and
-  explosions chain nearby bombs.
+  your full running momentum — the classic flag-relay play).
+- **Punch power = your momentum.** A standing jab tickles (~4%); a full
+  sprint punch takes ~40% and knocks the target **out cold** — an
+  unconscious ragdoll for up to ~3s that wakes with its remaining hp.
+- **Any damage makes you drop** whatever you're holding — flag, bomb, or
+  a squirming player. There's no health regen; damage sticks until you
+  respawn. Friendly fire is real, exactly as chaotic as it sounds.
+- **Bombs**: the bomb button pulls out a *lit* bomb (3s fuse, burning in
+  your hands — cook it for airbursts, or die holding it). One live bomb
+  per player until yours goes off. Blasts pop everything up and out with
+  equal force, chain nearby bombs, and a point-blank hit is lethal.
+- **Impacts hurt**: wall slams at sprint speed, long falls, and being hit
+  by a flying body all deal damage (with a mercy rule so ordinary bumps
+  don't kill).
+- **Grab players**: they dangle overhead — still punching (one clean
+  pummel forces the drop), still able to grab you back — until you throw
+  them (toward the void, ideally).
 
 ## What's in the box
 

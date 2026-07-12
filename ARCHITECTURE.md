@@ -101,8 +101,10 @@ on other players. Cosmetics never affect gameplay.
 
 One impulse-based rigid-body module moves everything — players, bombs,
 flags — with per-kind **materials** (`config.physics.materials`: mass,
-restitution e, friction μ, damping). Modeled on the BombSquad physics
-research (`deep-research-report.md`, ODE-style dynamics):
+restitution e, friction μ, damping). Gameplay behavior is matched
+value-for-value against BombSquad's open-source engine
+(see `docs/bombsquad-parity.md`; `deep-research-report.md` covers the
+underlying ODE-style dynamics):
 
 - **Impulse collisions**: `j = -(1+e)·v_rel·n / (1/m_A + 1/m_B)`; equal
   masses exchange momentum, light props get flung (Δv = J/m). Used for
@@ -114,29 +116,40 @@ research (`deep-research-report.md`, ODE-style dynamics):
 - **Damping & stability**: ODE-style per-step `v *= (1-damp)`, a max-speed
   clamp, a sleep threshold for resting bodies, and substep CCD so fast
   bodies can't tunnel through thin walls.
-- **Punch** = fist as a moving collider: fist speed = swing + body speed
-  (+ air bonus); the impulse formula above (fist effective mass 2.5) yields
-  damage AND knockback, so momentum is the weapon. Impulse thresholds — not
-  damage — decide grip-breaks (`grab.breakImpulse`) and stumbles
-  (`player.stumbleImpulse`), including for player-player body slams.
+- **Locomotion** (BombSquad roller-ball, in `sim.js`): walk 2.3, run 6.8
+  via a "gear" that winds up with smoothed speed; finite motor accel means
+  wide turns at speed; releasing the stick is a braked skid; **no air
+  control** — jumps commit you to the arc. Gravity −20.
+- **Punch** = a live fist collider for the ~0.3s swing; damage rides on 3D
+  body speed with a mid-swing timing peak (standing ≈ 4, sprint ≈ 41,
+  cap 60), knockback and pop-up scale with damage, and there's a small
+  self-recoil. No swinging while holding something. Friendly fire is on.
+- **Knockout**: one hit past ~22 dmg puts a player out cold — an
+  unconscious ragdoll for `(0.909·dmg − 20)/12` s (max ≈ 3.3s, wearing
+  off half as fast airborne), waking with remaining hp. ANY damage drops
+  whatever the target holds. Death (hp 0 / falls) is separate.
+- **Impact damage** (head-jolt model): wall slams past Δv 5, landings past
+  Δv 9, body-vs-body slams past Δv 4 — all with BombSquad's mercy rule
+  (`max(dmg−20, hp−1)` when it would kill) and a short per-player cooldown.
 - **Grabs** (BombSquad carry rules): a grabbed player is hoisted OVERHEAD
   like an item and rides the grabber; anything held (flag/bomb/player) is
-  carried with both hands. The victim can pummel the grabber (chip damage)
-  or grab back, forcing a grounded MUTUAL grapple where the pair moves by
-  the average of both players' steering (equal strength; opposed inputs
-  stalemate, shuffle friction stops coasting). Grab again = mild
-  momentum-flavored toss; the throw button is the strong aimed hurl —
-  either from a mutual grapple breaks both grips. (`physics.springDamper`
-  remains a validated utility for future soft constraints.)
-- **Blasts** apply radial impulses with linear falloff; per-kind impulse
-  magnitudes approximate pressure × exposed area.
-- **Stumble** approximates active-ragdoll balance loss (control lost
-  ~0.7s + wobble); KO is the full flop. Punch cooldown (0.75s) is longer
-  than stumble recovery so there is no infinite punch-lock.
+  carried with both hands. The victim can pummel the grabber (any damage
+  forces the drop) or grab back, forcing a grounded MUTUAL grapple where
+  the pair moves by the average of both players' steering. Grab or throw
+  from a grapple breaks both grips. (`physics.springDamper` remains a
+  validated utility for future soft constraints.)
+- **Bombs & throws**: the bomb button spawns a LIT bomb held overhead
+  (3.0s fuse, burning while held, one live bomb per player); bomb and grab
+  buttons both perform the universal ~45° throw — power from aim
+  magnitude, FULL momentum inheritance, weaker within 0.5s of pickup.
+- **Blasts**: linear damage falloff to zero at the edge (point-blank
+  lethal), and a mass-normalized velocity kick — the same Δv for every
+  body, vertical component exaggerated (`blastKick`). Bombs caught in a
+  blast cook off 0.1–0.2s later (chains); punches shove but don't trigger.
 
 `npm run tune` runs the physics against analytic predictions (bounce peak
-= e²h, stop time = v/μg, momentum conservation, throw range, spring settle)
-and fails CI-style if a change breaks theory. Tune materials/impulses in
+= e²h, stop time = v/μg, momentum conservation, throw ranges, punch/blast
+tables) and fails CI-style if a change breaks theory. Tune values in
 config, then run `npm run tune && npm run smoke`.
 
 ## Known limitations / next steps

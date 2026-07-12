@@ -246,16 +246,18 @@ export class CharacterView {
     this.rig.rotation.y = p.face;
 
     const ko = p.state === 'ko';
-    this.lie = clamp(this.lie + (ko ? 5 : -8) * dt, 0, 1);
+    // knocked out cold (alive, unconscious): tumbles mid-air, lies flat on
+    // the ground until it wears off — BombSquad's knockout ragdoll
+    const knocked = !ko && (p.knockT ?? 0) > 0;
+    this.lie = clamp(this.lie + (ko || (knocked && p.y <= 0.05) ? 5 : -8) * dt, 0, 1);
     for (const x of this.xeyes) x.visible = ko;
     for (const e of this.eyes) e.visible = !ko;
     for (const pu of this.pupils) pu.visible = !ko;
 
-    const stumbling = !ko && (p.stumbleT ?? 0) > 0;
-    if ((ko || stumbling) && p.y > 0.05) {
+    if ((ko || knocked) && p.y > 0.05) {
       this.pose.rotation.x -= 8 * dt; // tumbling through the air
     } else {
-      const run = clamp(p.spd / 6.4, 0, 1.2);
+      const run = knocked ? 0 : clamp(p.spd / 6.8, 0, 1.2);
       this.phase += dt * (4 + p.spd * 2.1);
       const airborne = p.y > 0.05;
       const sw = Math.sin(this.phase) * 0.95 * run;
@@ -299,17 +301,17 @@ export class CharacterView {
       this.pose.rotation.x = lerp(0.16 * run + airPitch, -Math.PI / 2 + 0.12, this.lie);
       this.pose.position.y = lerp(Math.abs(Math.sin(this.phase)) * 0.09 * run, 0.28, this.lie);
     }
-    // staggered: wobble like the balance servos gave up
-    this.pose.rotation.z = stumbling && p.y <= 0.05 ? Math.sin(this.time * 24) * 0.28 : 0;
+    // out cold on the ground: a faint dazed wriggle as they come to
+    this.pose.rotation.z = knocked && p.y <= 0.05 ? Math.sin(this.time * 20) * 0.12 : 0;
 
-    // blink
+    // blink (eyes stay shut while knocked out)
     this.blinkT -= dt;
     this.blinkAt -= dt;
     if (this.blinkAt <= 0) {
       this.blinkAt = 1.8 + Math.random() * 3;
       this.blinkT = 0.12;
     }
-    const eyeY = this.blinkT > 0 ? 0.15 : 1;
+    const eyeY = knocked || this.blinkT > 0 ? 0.15 : 1;
     for (const e of this.eyes) e.scale.y = eyeY;
 
     // hat flourishes (halo floats)

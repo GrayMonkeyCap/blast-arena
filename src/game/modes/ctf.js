@@ -19,7 +19,7 @@
 // serializes into snapshots for free.
 
 import { emit, endRound, overFloor } from '../sim.js';
-import { integrateBody, collideBodies, blastImpulse, applyImpulse, invMass } from '../physics.js';
+import { integrateBody, collideBodies, blastKick, applyImpulse, invMass } from '../physics.js';
 import { otherTeam } from '../../core/config.js';
 
 const mkFlag = (team, pos) => ({
@@ -28,8 +28,10 @@ const mkFlag = (team, pos) => ({
   x: pos.x, z: pos.z, y: 0,
   vx: 0, vz: 0, vy: 0,
   carrier: null,
+  lastCarrier: null, // credited if the flag scores after being thrown in
   idle: 0, // seconds since dropped (untouched)
   cd: 0, // grab lockout right after a drop
+  pcd: 0, // punch lockout (one smack per swing)
 });
 
 const getP = (sim, id) => sim.state.players.find((p) => p.id === id);
@@ -54,6 +56,7 @@ export const CtfMode = {
     const s = sim.state;
     const cfg = sim.config.flag;
     f.cd = Math.max(0, f.cd - dt);
+    f.pcd = Math.max(0, f.pcd - dt);
 
     if (f.st === 'carry') {
       const c = getP(sim, f.carrier);
@@ -84,6 +87,22 @@ export const CtfMode = {
       if (f.idle >= cfg.idleReturn) {
         this.returnFlag(sim, f, true);
         return;
+      }
+      // BombSquad scores when the flag ENTERS the base region — carried or
+      // not. A thrown/punched flag sliding into the enemy base counts (the
+      // relay play), still gated on that team's own flag being home.
+      const team = otherTeam(f.team);
+      const base = sim.level.bases[team];
+      if (s.phase === 'play' && Math.hypot(f.x - base.x, f.z - base.z) < base.r) {
+        if (s.flags[team].st === 'home') {
+          const c = getP(sim, f.lastCarrier);
+          this.score(sim, c && c.team === team ? c : { team, id: null, name: 'A flying flag' }, f);
+          return;
+        }
+        if (s.tick - this._blockedAt > 120) {
+          this._blockedAt = s.tick;
+          emit(sim, { t: 'scoreBlocked', id: f.lastCarrier, team });
+        }
       }
     }
 
@@ -137,6 +156,7 @@ export const CtfMode = {
     if (Math.hypot(p.x - f.x, p.z - f.z) > sim.config.flag.grabRange) return false;
     f.st = 'carry';
     f.carrier = p.id;
+    f.lastCarrier = p.id;
     f.idle = 0;
     p.carryFlag = f.team;
     emit(sim, { t: 'flagSteal', id: p.id, name: p.name, team: f.team, byTeam: p.team });
@@ -162,21 +182,21 @@ export const CtfMode = {
     emit(sim, { t: 'flagDrop', team: f.team, x: f.x, z: f.z });
   },
 
-  // throw button while carrying: hurl the flag downfield (inherits runner
-  // momentum, shorter arc than a bomb — it's heavy)
-  throwCarried(sim, p, dir, power) {
+  // throw button while carrying: hurl the flag downfield with the universal
+  // throw (full momentum inheritance — the classic flag-relay play; a flag
+  // that sails into your base while your own is home SCORES)
+  throwCarried(sim, p, dir, vel) {
     const f = sim.state.flags[p.carryFlag];
     if (!f) return;
-    const mult = sim.config.flag.throwMult;
     p.carryFlag = null;
     f.st = 'drop';
     f.carrier = null;
     f.x = p.x + dir.x * 0.6;
     f.z = p.z + dir.z * 0.6;
     f.y = p.y + 1.0;
-    f.vx = dir.x * power.sh * mult + p.vx * 0.6;
-    f.vz = dir.z * power.sh * mult + p.vz * 0.6;
-    f.vy = power.sv * mult;
+    f.vx = vel.vx;
+    f.vz = vel.vz;
+    f.vy = vel.vy;
     f.idle = 0;
     f.cd = sim.config.flag.dropLockout;
     emit(sim, { t: 'flagThrow', id: p.id, team: f.team, x: f.x, z: f.z });
@@ -199,21 +219,24 @@ export const CtfMode = {
     // sim.breakGrabs already routed the drop through dropCarried
   },
 
-  // explosions shove free flags like any other physics object (Δv = J/m)
+  // explosions kick free flags exactly like every other body (BombSquad
+  // blasts are mass-normalized: same Δv for flags, bombs and players)
   onExplosion(sim, x, z, radius) {
     const cfg = sim.config.bomb;
     for (const f of Object.values(sim.state.flags)) {
       if (f.st === 'carry') continue;
-      blastImpulse(f, sim.mats.flag, x, z, radius, cfg.blastImpulse.flag, cfg.blastLift.flag);
+      blastKick(f, x, z, radius, cfg.blastDvXZ, cfg.blastDvY * 0.7);
     }
   },
 
   // punches smack free flags with the fist-collider impulse formula
+  // (once per swing — the fist stays live for several ticks)
   onPunchObject(sim, fx, fz, radius, dir, vFist, invFist) {
     const e = sim.config.punch.restitution;
     for (const f of Object.values(sim.state.flags)) {
-      if (f.st === 'carry') continue;
+      if (f.st === 'carry' || f.pcd > 0) continue;
       if (Math.hypot(f.x - fx, f.z - fz) > radius + 0.2) continue;
+      f.pcd = 0.35;
       const j = ((1 + e) * vFist) / (invFist + invMass(sim.mats.flag));
       applyImpulse(f, sim.mats.flag, dir.x * j, dir.z * j, j * 0.2);
     }

@@ -67,6 +67,7 @@ export function createInput({ uiRoot, isTouch }) {
       // movement (screen up = world -z with our fixed camera)
       let mx = key('KeyD') + key('ArrowRight') - key('KeyA') - key('ArrowLeft');
       let mz = key('KeyS') + key('ArrowDown') - key('KeyW') - key('ArrowUp');
+      const keyboardMove = mx !== 0 || mz !== 0;
       if (touch?.joy.active) {
         mx += touch.joy.x;
         mz += touch.joy.z;
@@ -74,7 +75,16 @@ export function createInput({ uiRoot, isTouch }) {
       const m = Math.hypot(mx, mz);
       if (m > 1) { mx /= m; mz /= m; }
 
-      // aim
+      // run value (BombSquad): keys always sprint (hold Shift to walk);
+      // the touch stick walks on small deflection, runs pushed to the rim
+      let run = 0;
+      if (keyboardMove) run = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 0 : 1;
+      else if (touch?.joy.active) run = clamp((m - 0.5) / 0.4, 0, 1);
+
+      // aim: direction + distance. The distance maps to THROW POWER in the
+      // sim (BombSquad throws are power-based, not land-exactly-here).
+      const AIM_MIN = CONFIG.bomb.aimRangeMin;
+      const AIM_MAX = CONFIG.bomb.aimRangeMax;
       let ax = 0, az = 0, ad = 7, aiming = false, aimPoint = null;
       if (touch) {
         const t = touch.consumeThrow(); // {aimX, aimZ, len} or null
@@ -83,12 +93,12 @@ export function createInput({ uiRoot, isTouch }) {
           if (t.len > 0.01) {
             const n = norm2(t.aimX, t.aimZ);
             ax = n.x; az = n.z;
-            ad = clamp(3 + t.len * (CONFIG.bomb.maxRange - 3), CONFIG.bomb.minRange, CONFIG.bomb.maxRange);
+            ad = clamp(3 + t.len * (AIM_MAX - 3), AIM_MIN, AIM_MAX);
           }
         } else if (touch.aim.active && (touch.aim.x || touch.aim.z)) {
           const n = norm2(touch.aim.x, touch.aim.z);
           ax = n.x; az = n.z;
-          ad = clamp(3 + touch.aim.len * (CONFIG.bomb.maxRange - 3), CONFIG.bomb.minRange, CONFIG.bomb.maxRange);
+          ad = clamp(3 + touch.aim.len * (AIM_MAX - 3), AIM_MIN, AIM_MAX);
           aiming = true;
         }
         if (touch.consumeGrab()) grabPulse = now() + PULSE;
@@ -104,7 +114,7 @@ export function createInput({ uiRoot, isTouch }) {
           if (len > 0.2) {
             ax = dx / len;
             az = dz / len;
-            ad = clamp(len, CONFIG.bomb.minRange, CONFIG.bomb.maxRange);
+            ad = clamp(len, AIM_MIN, AIM_MAX);
           }
           aimPoint = { x: myPos.x + ax * ad, z: myPos.z + az * ad };
         }
@@ -113,7 +123,7 @@ export function createInput({ uiRoot, isTouch }) {
       const t = now();
       return {
         input: {
-          mx, mz, ax, az, ad,
+          mx, mz, ax, az, ad, run,
           throw: t < throwPulse,
           grab: t < grabPulse,
           punch: t < punchPulse,
