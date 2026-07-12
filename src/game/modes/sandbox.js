@@ -16,11 +16,11 @@
 // protection, endless round) via makeLabConfig() so tests iterate quickly.
 
 import { emit } from '../sim.js';
-import { integrateBody, collideBodies, blastImpulse, applyImpulse, invMass } from '../physics.js';
+import { integrateBody, collideBodies, blastKick, applyImpulse, invMass } from '../physics.js';
 import { CONFIG } from '../../core/config.js';
 import { clamp, norm2 } from '../../core/math.js';
 
-const ZERO = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, throw: false, grab: false, punch: false, jump: false };
+const ZERO = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, run: 1, throw: false, grab: false, punch: false, jump: false };
 
 export function makeLabConfig() {
   const c = structuredClone(CONFIG);
@@ -35,7 +35,7 @@ export function makeLabConfig() {
 const mkFlag = (team, pos) => ({
   team, st: 'home',
   x: pos.x, z: pos.z, y: 0, vx: 0, vz: 0, vy: 0,
-  carrier: null, idle: 0, cd: 0,
+  carrier: null, idle: 0, cd: 0, pcd: 0,
 });
 
 const getP = (sim, id) => sim.state.players.find((p) => p.id === id);
@@ -100,6 +100,27 @@ function createFighterBrain(id, rng = Math.random) {
       }
       this.holdT = 0;
 
+      // holding a lit bomb: cook it briefly, then hurl it at the target
+      // (or panic-throw the instant the fuse runs short)
+      if (me.heldBomb) {
+        const bomb = sim.state.bombs.find((b) => b.id === me.heldBomb);
+        const fuse = bomb ? bomb.fuse : 0;
+        const input = { ...ZERO, mx: to.x, mz: to.z };
+        if (fuse < 2.4 || d < 3.5) {
+          const leadT = Math.max(0.3, fuse - 0.4);
+          const hw2 = sim.level.bounds.w / 2 - 1.3;
+          const hd2 = sim.level.bounds.d / 2 - 1.3;
+          const px = clamp(target.x + target.vx * leadT, -hw2, hw2);
+          const pz = clamp(target.z + target.vz * leadT, -hd2, hd2);
+          const a = Math.atan2(px - me.x, pz - me.z) + (rng() * 2 - 1) * 0.1;
+          input.ax = Math.sin(a);
+          input.az = Math.cos(a);
+          input.ad = Math.hypot(px - me.x, pz - me.z);
+          input.throw = true;
+        }
+        return input;
+      }
+
       // steering: close in at range, circle at punch range
       let mx, mz;
       if (d > 2.4) {
@@ -143,15 +164,8 @@ function createFighterBrain(id, rng = Math.random) {
         this.grabCool = 6 + rng() * 5;
         return input;
       }
-      // predictive bombs at range
-      if (this.bombCool <= 0 && me.throwCd <= 0 && d > 3 && d < sim.config.bomb.maxRange) {
-        const leadT = sim.config.bomb.fuse * 0.8;
-        const px = clamp(target.x + target.vx * leadT, -hw, hw);
-        const pz = clamp(target.z + target.vz * leadT, -hd, hd);
-        const a = Math.atan2(px - me.x, pz - me.z) + (rng() * 2 - 1) * 0.1;
-        input.ax = Math.sin(a);
-        input.az = Math.cos(a);
-        input.ad = Math.hypot(px - me.x, pz - me.z);
+      // pull out a bomb at range (thrown next think once it's in hand)
+      if (this.bombCool <= 0 && d > 3 && d < 12) {
         input.throw = true;
         this.bombCool = 1.4 + rng() * 1.6;
       }
@@ -256,19 +270,18 @@ function makeSandbox(variant) {
       emit(sim, { t: 'flagDrop', team: f.team, x: f.x, z: f.z });
     },
 
-    throwCarried(sim, p, dir, power) {
+    throwCarried(sim, p, dir, vel) {
       const f = sim.state.flags[p.carryFlag];
       if (!f) return;
-      const mult = sim.config.flag.throwMult;
       p.carryFlag = null;
       f.st = 'drop';
       f.carrier = null;
       f.x = p.x + dir.x * 0.6;
       f.z = p.z + dir.z * 0.6;
       f.y = p.y + 1.0;
-      f.vx = dir.x * power.sh * mult + p.vx * 0.6;
-      f.vz = dir.z * power.sh * mult + p.vz * 0.6;
-      f.vy = power.sv * mult;
+      f.vx = vel.vx;
+      f.vz = vel.vz;
+      f.vy = vel.vy;
       f.idle = 0;
       f.cd = sim.config.flag.dropLockout;
       emit(sim, { t: 'flagThrow', id: p.id, team: f.team, x: f.x, z: f.z });
@@ -290,15 +303,16 @@ function makeSandbox(variant) {
       const cfg = sim.config.bomb;
       for (const f of Object.values(sim.state.flags)) {
         if (f.st === 'carry') continue;
-        blastImpulse(f, sim.mats.flag, x, z, radius, cfg.blastImpulse.flag, cfg.blastLift.flag);
+        blastKick(f, x, z, radius, cfg.blastDvXZ, cfg.blastDvY * 0.7);
       }
     },
 
     onPunchObject(sim, fx, fz, radius, dir, vFist, invFist) {
       const e = sim.config.punch.restitution;
       for (const f of Object.values(sim.state.flags)) {
-        if (f.st === 'carry') continue;
+        if (f.st === 'carry' || f.pcd > 0) continue;
         if (Math.hypot(f.x - fx, f.z - fz) > radius + 0.2) continue;
+        f.pcd = 0.35;
         const j = ((1 + e) * vFist) / (invFist + invMass(sim.mats.flag));
         applyImpulse(f, sim.mats.flag, dir.x * j, dir.z * j, j * 0.2);
       }
@@ -310,15 +324,21 @@ function makeSandbox(variant) {
     // recalled — no dangling references).
     resetScene(sim) {
       sim.state.bombs = [];
+      sim.state.powerups = [];
+      sim.state.puPend = [];
       for (const p of sim.state.players) {
         p.carryFlag = null; p.heldBomb = null; p.heldPlayer = null; p.heldBy = null;
+        p.shieldHp = 0; p.glovesT = 0; p.frozenT = 0; p.curseT = 0;
+        p.mines = 0; p.bombKind = 'normal'; p.bombKindT = 0;
+        p.bombCount = sim.config.bomb.perPlayer; p.tripleT = 0;
         if (!p.bot) continue;
         const s = sim.level.spawns[p.team][0];
         p.x = s.x; p.z = s.z; p.y = 0;
         p.vx = 0; p.vz = 0; p.vy = 0;
         p.hp = sim.config.player.hp;
         p.state = 'alive';
-        p.stumbleT = 0;
+        p.knockT = 0;
+        p.gearSpd = 0;
       }
       for (const f of Object.values(sim.state.flags)) this.returnFlag(sim, f, false);
       emit(sim, { t: 'labReset' });

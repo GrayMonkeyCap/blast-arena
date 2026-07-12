@@ -37,7 +37,7 @@ const overFloor = (level, x, z) =>
 // Fast bodies are integrated in substeps (poor-man's CCD).
 // Returns { bounced, impact } for sound/fx triggers.
 export function integrateBody(level, world, body, mat, dt, opts = {}) {
-  const out = { bounced: false, impact: 0 };
+  const out = { bounced: false, impact: 0, wallImpact: 0, floorImpact: 0 };
   // restY: height of the body's y-origin when resting on the floor
   // (players measure y at the feet -> 0; bombs at the center -> radius)
   const restY = opts.restY ?? 0;
@@ -81,6 +81,7 @@ export function integrateBody(level, world, body, mat, dt, opts = {}) {
           body.vz -= (tz / tlen) * drop;
         }
         out.impact = Math.max(out.impact, Math.abs(vn));
+        out.wallImpact = Math.max(out.wallImpact, Math.abs(vn));
       }
     }
 
@@ -94,6 +95,7 @@ export function integrateBody(level, world, body, mat, dt, opts = {}) {
         // floor contact: bounce if falling fast enough, else come to rest
         const vin = -body.vy;
         body.y = restY;
+        out.floorImpact = Math.max(out.floorImpact, vin);
         if (vin > mat.bounceMin) {
           body.vy = vin * mat.restitution;
           out.bounced = true;
@@ -189,10 +191,12 @@ export function applyImpulse(body, mat, jx, jz, jy = 0) {
   }
 }
 
-// Radial blast: outward impulse with linear falloff from the center.
-// jMax/jLift are impulses (report: explosions apply impulses; the SAME blast
-// flings a bomb much farther than a player because Δv = J/m).
-export function blastImpulse(body, mat, cx, cz, radius, jMax, jLift) {
+// Radial blast: outward velocity kick with linear falloff from the center.
+// BombSquad (rigid_body.cc) scales blast force by the target's mass so a
+// given blast affects every body EQUALLY — dvXZ/dvY are Δv at the epicenter
+// (the vertical component is exaggerated: blasts pop things up and out).
+// Returns the applied Δv magnitude (0 outside the radius).
+export function blastKick(body, cx, cz, radius, dvXZ, dvY) {
   const dx = body.x - cx;
   const dz = body.z - cz;
   const d = Math.hypot(dx, dz);
@@ -205,8 +209,11 @@ export function blastImpulse(body, mat, cx, cz, radius, jMax, jLift) {
   } else {
     nx = dx / d; nz = dz / d;
   }
-  applyImpulse(body, mat, nx * jMax * t, nz * jMax * t, jLift * (0.5 + 0.5 * t));
-  return jMax * t;
+  body.vx += nx * dvXZ * t;
+  body.vz += nz * dvXZ * t;
+  body.vy = Math.max(body.vy, 0) + dvY * t;
+  body.y = Math.max(body.y, 0.02);
+  return Math.hypot(dvXZ * t, dvY * t);
 }
 
 // -------------------------------------------------------------- constraints

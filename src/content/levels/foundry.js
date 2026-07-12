@@ -65,6 +65,15 @@ export const foundry = {
     ],
   },
 
+  // powerup boxes drop here in waves (see config.powerups) — contested
+  // spots: the exposed long-edge rims, the lane mouths between bunker and
+  // mid walls, and two off-center pads by the flag pillars
+  powerupSpawns: [
+    { x: 0, z: -12.5 }, { x: 0, z: 12.5 },
+    { x: -11.5, z: 0 }, { x: 11.5, z: 0 },
+    { x: -3, z: 7.5 }, { x: 3, z: -7.5 },
+  ],
+
   // Collision boxes. `h` matters: airborne bombs (and launched players)
   // travel over anything lower than their height.
   solids: [

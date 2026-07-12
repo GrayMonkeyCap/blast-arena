@@ -13,7 +13,7 @@
 
 import { CONFIG } from '../src/core/config.js';
 import {
-  integrateBody, collideBodies, blastImpulse, springDamper, launchSpeed, invMass,
+  integrateBody, collideBodies, blastKick, springDamper, invMass,
 } from '../src/game/physics.js';
 
 const MAT = CONFIG.physics.materials;
@@ -86,18 +86,26 @@ function check(name, measured, expected, tolFrac, note = '') {
   check('head-on residual speed (e=0)', Math.abs(a.vx) + Math.abs(b.vx), 0, 0.001);
 }
 
-// ---- 4. ballistics: throw solved for range R lands ~R away
+// ---- 4. ballistics: the universal 45° throw (BombSquad power model).
+// Full-power standing throw should land ~s²/g away (+ a bit for the 1.6u
+// release height); a full-sprint throw inherits carrier velocity and sails.
 {
-  const R = 8;
-  const { sh, sv } = launchSpeed(R, CONFIG.bomb.throwPitch, g);
-  const b = { x: 0, z: 0, y: 1.1, vx: sh, vz: 0, vy: sv };
-  let landed = 0;
-  for (let i = 0; i < 600; i++) {
-    const out = integrateBody(level, world, b, MAT.bomb, dt, { restY: MAT.bomb.radius });
-    if (out.bounced) { landed = b.x; break; }
-  }
-  // launched from hand height 1.1 -> flies slightly past R
-  check('throw range (solved for 8)', landed, R, 0.25, '(launch is 1.1u above floor)');
+  const c = CONFIG.throw;
+  const fly = (vx, vy) => {
+    const b = { x: 0, z: 0, y: 1.6, vx, vz: 0, vy };
+    for (let i = 0; i < 600; i++) {
+      const out = integrateBody(level, world, b, MAT.bomb, dt, { restY: MAT.bomb.radius });
+      if (out.bounced || (b.y <= MAT.bomb.radius + 0.001 && b.vy === 0)) return b.x;
+    }
+    return b.x;
+  };
+  const sh = Math.cos(c.pitch) * c.speedMax;
+  const sv = Math.sin(c.pitch) * c.speedMax;
+  const standing = fly(sh, sv);
+  const running = fly(sh + CONFIG.player.runSpeed * c.inherit, sv);
+  console.log(`      throw: standing ${standing.toFixed(1)}u, full-sprint ${running.toFixed(1)}u`);
+  check('standing max throw range', standing, (c.speedMax ** 2) / g * Math.sin(2 * c.pitch) + 1.4, 0.25, '(45° lob + release height)');
+  check('sprint throw sails much farther', running / standing, 1.9, 0.35, '(momentum inheritance)');
 }
 
 // ---- 5. spring-damper utility: displaced body settles at anchor, no orbit
@@ -119,35 +127,64 @@ function check(name, measured, expected, tolFrac, note = '') {
   check('grab spring settle time', settle < 0 ? 99 : settle, 1.2, 1.0, '(must settle, not orbit)');
 }
 
-// ---- 6. punch impulse table: j = (1+e)·v_fist / (1/m_fist + 1/m_target)
+// ---- 6. punch damage table (BombSquad momentum model): damage rides on
+// 3D body speed, ×0.7–1.0 for swing timing; a single hit past the knockout
+// threshold puts the target out cold for units/12 seconds.
 {
   const c = CONFIG.punch;
-  const inv = 1 / c.fistMass + invMass(MAT.player);
-  const row = (label, vFist) => {
-    const j = ((1 + c.restitution) * vFist) / inv;
+  const k = CONFIG.player.knockout;
+  const row = (label, v3) => {
+    const dmg = Math.min(c.dmgCap, c.dmgBase + c.dmgPerSpeed * v3); // peak timing
+    const dv = dmg * c.kbPerDmg;
+    const units = Math.min(k.maxUnits, dmg * k.unitsPerDamage - k.baseUnits);
+    const kt = units >= 1 ? units / k.unitsPerSec : 0;
     console.log(
-      `      punch ${label.padEnd(18)} v_fist=${vFist.toFixed(1).padStart(5)}  j=${j.toFixed(1).padStart(5)}  Δv=${(j * invMass(MAT.player)).toFixed(1)}  dmg=${(j * c.dmgPerImpulse).toFixed(0).padStart(3)}  grip-break=${j >= CONFIG.grab.breakImpulse ? 'Y' : 'n'}  stumble=${j >= CONFIG.player.stumbleImpulse ? 'Y' : 'n'}`,
+      `      punch ${label.padEnd(16)} v=${v3.toFixed(1).padStart(4)}  dmg=${dmg.toFixed(0).padStart(3)}  Δv=${dv.toFixed(1).padStart(5)}  knockout=${kt > 0 ? kt.toFixed(2) + 's' : '   —'}`,
     );
-    return j;
+    return dmg;
   };
-  const jStand = row('standing', c.swingSpeed);
-  const jRun = row('running', c.swingSpeed + CONFIG.player.speed);
-  row('running jump', c.swingSpeed + CONFIG.player.speed + c.airBonus);
-  check('running punch >> standing punch', jRun / jStand, 1.8, 0.25, '(momentum is the weapon)');
+  const dStand = row('standing', 0);
+  row('walking', CONFIG.player.walkSpeed);
+  const dRun = row('sprinting', CONFIG.player.runSpeed);
+  row('sprint jump', Math.hypot(CONFIG.player.runSpeed, CONFIG.player.jumpVel * 0.7));
+  check('sprint punch ≈ 40% hp (BombSquad)', dRun, 41, 0.15, '(tutorial: running punch ≈ 40%)');
+  check('standing jab stays a tickle', dStand, c.dmgBase, 0.01);
+  check('sprint punch knocks out', dRun * k.unitsPerDamage - k.baseUnits >= 1 ? 1 : 0, 1, 0.01, '(a clean running hit floors you)');
+
+  // boxing gloves powerup: same momentum curve × punch_power_scale
+  // (spazfactory.py: 1.2 → 1.4 with gloves) on a 300ms cooldown
+  const gl = CONFIG.powerups.gloves;
+  const dRunGloves = Math.min(c.dmgCap * gl.powerScale, (c.dmgBase + c.dmgPerSpeed * CONFIG.player.runSpeed) * gl.powerScale);
+  console.log(`      punch sprint+gloves    v= ${CONFIG.player.runSpeed.toFixed(1)}  dmg= ${dRunGloves.toFixed(0)}  cooldown=${gl.cooldown}s (vs ${c.cooldown}s)`);
+  check('gloves scale punches 1.2→1.4', dRunGloves / dRun, 1.4 / 1.2, 0.01, '(BombSquad punch_power_scale)');
 }
 
-// ---- 7. blast Δv falloff table (players vs light props)
+// ---- 6b. shield spillover math (spaz.py): the shield eats damage AND
+// knockback whole; only the breaking hit's overshoot past hp+spillover
+// (650+500 on the 1000 scale, 65+50 on ours) leaks through to the player.
+{
+  const sh = CONFIG.powerups.shield;
+  const leak = (D) => Math.max(0, D - sh.hp - sh.spillover);
+  console.log(`      shield: hp=${sh.hp} spillover=${sh.spillover} — hit 60 leaks ${leak(60)}, hit 100 leaks ${leak(100)}, hit 200 leaks ${leak(200)}`);
+  check('shield swallows a lethal blast whole', leak(CONFIG.bomb.maxDamage), 0, 0.01, '(point-blank bomb ≤ hp+spillover)');
+  check('shield spillover leaks the overshoot', leak(200), 200 - sh.hp - sh.spillover, 0.01, '(mine-class hits get through)');
+}
+
+// ---- 7. blast table (BombSquad): linear damage falloff to ZERO at the
+// edge, point-blank lethal; the velocity kick is the SAME for every body
+// (mass-normalized force), vertical component exaggerated.
 {
   const c = CONFIG.bomb;
-  for (const d of [0, 1.5, 3, 4.2]) {
+  for (const d of [0, 0.8, 1.5, 2.2]) {
     const t = Math.max(0, 1 - d / c.blastRadius);
-    const dvP = c.blastImpulse.player * (0.4 + 0.6 * t) * t > 0 ? c.blastImpulse.player * (0.4 + 0.6 * t) * invMass(MAT.player) : 0;
-    const dvB = c.blastImpulse.bomb * t * invMass(MAT.bomb);
-    const dvF = c.blastImpulse.flag * t * invMass(MAT.flag);
-    console.log(`      blast @d=${d.toFixed(1).padStart(3)}  Δv player=${(t > 0 ? dvP : 0).toFixed(1).padStart(5)}  bomb=${dvB.toFixed(1).padStart(5)}  flag=${dvF.toFixed(1).padStart(5)}`);
+    console.log(
+      `      blast @d=${d.toFixed(1).padStart(3)}  dmg=${(c.maxDamage * t).toFixed(0).padStart(3)}  Δv=(${(c.blastDvXZ * t).toFixed(1)} out, ${(c.blastDvY * t).toFixed(1)} up) — all bodies alike`,
+    );
   }
-  const dvBomb0 = c.blastImpulse.bomb * invMass(MAT.bomb);
-  check('point-blank bomb shove sane', dvBomb0, 13.7, 0.35, '(chain shoves lively, not silly)');
+  check('point-blank blast is lethal', c.maxDamage, CONFIG.player.hp, 0.01);
+  const b = { x: 1.0, z: 0, y: MAT.bomb.radius, vx: 0, vz: 0, vy: 0 };
+  const dv = blastKick(b, 0, 0, c.blastRadius, c.blastDvXZ, c.blastDvY);
+  check('blastKick applies uniform Δv', Math.hypot(b.vx, b.vy), dv, 0.05, '(mass-normalized, like BombSquad)');
 }
 
 console.log(failures === 0 ? '\nTUNE OK — physics matches theory' : `\nTUNE FAILED (${failures})`);

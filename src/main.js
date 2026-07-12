@@ -67,8 +67,10 @@ function playSfx(events, myId, myPos) {
       case 'bounce': sfx.play('bounce', spatial(ev) * 0.7); break;
       case 'punch': sfx.play('punch', spatial(ev)); break;
       case 'punchHit': sfx.play('punchHit', spatial(ev)); break;
+      case 'impact': sfx.play('bounce', spatial(ev)); break;
+      case 'knockout': sfx.play('punchHit', spatial(ev) * 0.6); break;
       case 'jump': if (ev.id === myId) sfx.play('jump'); break;
-      case 'grabBomb': sfx.play('grab'); break;
+      case 'grabBomb': case 'bombOut': sfx.play('grab'); break;
       case 'grabPlayer': sfx.play('grabPlayer'); break;
       case 'playerThrow': sfx.play('playerThrow', spatial(ev)); break;
       case 'flagSteal': sfx.play('flagTaken'); break;
@@ -83,6 +85,15 @@ function playSfx(events, myId, myPos) {
       case 'tick': sfx.play('tick'); break;
       case 'go': sfx.play('go'); break;
       case 'roundOver': sfx.play(ev.winner !== 'draw' ? 'win' : 'lose'); break;
+      case 'powerup': sfx.play(ev.kind === 'curse' ? 'curse' : 'powerup', spatial(ev)); break;
+      case 'wearOff': if (ev.id === myId) sfx.play('wearOff'); break;
+      case 'shieldHit': sfx.play('shieldHit', spatial(ev)); break;
+      case 'shieldDown': sfx.play('shieldDown', spatial(ev)); break;
+      case 'freeze': sfx.play('freeze', spatial(ev)); break;
+      case 'shatter': sfx.play('shatter', spatial(ev)); break;
+      case 'mineArm': sfx.play('mineArm', spatial(ev) * 0.8); break;
+      case 'stick': sfx.play('stick', spatial(ev)); break;
+      case 'powerupBoom': sfx.play('bounce', spatial(ev)); break;
     }
   }
 }

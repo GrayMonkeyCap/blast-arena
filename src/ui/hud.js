@@ -176,8 +176,13 @@ export function createHud(uiRoot, { onExit, onMute, muted }) {
             pushFeed(
               ev.cause === 'fall' ? `🕳️ ${name(ev)} fell into the void`
               : ev.cause === 'punch' ? `👊 ${name(ev)} got knocked out`
+              : ev.cause === 'shatter' ? `🧊 ${name(ev)} was shattered`
+              : ev.cause === 'curse' ? `💀 the curse claimed ${name(ev)}`
               : `💥 ${name(ev)} was blown up`,
             );
+            break;
+          case 'curse':
+            pushFeed(`💀 ${pname(ev.id)} is CURSED — find a med-pack!`, 'warn');
             break;
           case 'playerThrow':
             pushFeed(`🤾 ${pname(ev.id)} threw ${pname(ev.target)}!`);

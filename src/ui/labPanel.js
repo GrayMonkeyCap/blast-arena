@@ -59,8 +59,8 @@ export function createLabPanel(uiRoot, transport) {
       for (const ev of events) {
         switch (ev.t) {
           case 'punchHit':
-            pushLog(`👊 punchHit j=<b>${ev.j}</b>${ev.target === subject?.id ? ' (subject)' : ''}`);
-            if (subject && ev.target === subject.id) track = { x: subject.x, z: subject.z, t: 0, air: 0, peakY: 0, label: `j=${ev.j}` };
+            pushLog(`👊 punchHit dmg=<b>${ev.dmg}</b>${ev.target === subject?.id ? ' (subject)' : ''}`);
+            if (subject && ev.target === subject.id) track = { x: subject.x, z: subject.z, t: 0, air: 0, peakY: 0, label: `dmg=${ev.dmg}` };
             break;
           case 'explode':
             if (subject && Math.hypot(ev.x - subject.x, ev.z - subject.z) < 5) {
@@ -71,9 +71,21 @@ export function createLabPanel(uiRoot, transport) {
           case 'hurt':
             impact.innerHTML = `last hit: ${ev.id === subject?.id ? 'subject' : ev.id === myId ? 'YOU' : ev.id} → hp <b>${ev.hp}</b>`;
             break;
-          case 'stumble': pushLog(`〰️ stumble (${ev.id === subject?.id ? 'subject' : ev.id === myId ? 'you' : ev.id})`); break;
+          case 'knockout': pushLog(`😵 knockout (${ev.id === subject?.id ? 'subject' : ev.id === myId ? 'you' : ev.id})`); break;
+          case 'impact': pushLog(`💢 impact dmg=<b>${ev.dmg}</b> (${ev.id === subject?.id ? 'subject' : ev.id === myId ? 'you' : ev.id})`); break;
           case 'gripBreak': pushLog('✋💨 grip broken'); break;
-          case 'bodySlam': pushLog(`🎳 body slam j=<b>${ev.j}</b>`); break;
+          case 'bodySlam': pushLog(`🎳 body slam Δv=<b>${ev.j}</b>`); break;
+          case 'bombOut': pushLog(ev.kind && ev.kind !== 'normal' ? `💣 ${ev.kind} out` : '💣 bomb out (fuse lit!)'); break;
+          case 'powerup': pushLog(`🎁 powerup: <b>${ev.kind}</b>`); break;
+          case 'wearOff': pushLog(`⌛ ${ev.kind} wore off`); break;
+          case 'shieldHit': pushLog(`🛡️ shield hit (<b>${ev.hp}</b> left)`); break;
+          case 'shieldDown': pushLog('🛡️💥 shield down'); break;
+          case 'freeze': pushLog('🧊 frozen solid'); break;
+          case 'thaw': pushLog('💧 thawed'); break;
+          case 'shatter': pushLog('🧊💥 SHATTERED'); break;
+          case 'curse': pushLog('💀 cursed (5s to live)'); break;
+          case 'mineArm': pushLog('⚠️ mine armed'); break;
+          case 'stick': pushLog('🎯 sticky bomb attached'); break;
           case 'grabPlayer': pushLog('🤝 player grabbed'); break;
           case 'playerThrow': pushLog('🤾 player thrown'); break;
           case 'jump': pushLog('⬆️ jump'); break;
@@ -106,11 +118,11 @@ export function createLabPanel(uiRoot, transport) {
       // --- live telemetry
       if (me) {
         const rows = [
-          `YOU&nbsp;&nbsp; spd <b>${fmt(me.spd)}</b> y <b>${fmt(me.y, 2)}</b> hp <b>${Math.round(me.hp)}</b>${me.carryFlag ? ' 🚩' : ''}${me.heldBomb ? ' 💣' : ''}${me.heldPlayer ? ' ✊' : ''}${me.stumbleT > 0 ? ' 〰️' : ''}`,
+          `YOU&nbsp;&nbsp; spd <b>${fmt(me.spd)}</b> y <b>${fmt(me.y, 2)}</b> hp <b>${Math.round(me.hp)}</b>${me.carryFlag ? ' 🚩' : ''}${me.heldBomb ? ' 💣' : ''}${me.heldPlayer ? ' ✊' : ''}${me.knockT > 0 ? ' 😵' : ''}`,
         ];
         if (subject) {
           rows.push(
-            `${subject.name.toUpperCase()} spd <b>${fmt(subject.spd)}</b> y <b>${fmt(subject.y, 2)}</b> hp <b>${Math.round(subject.hp)}</b> ${subject.state === 'ko' ? '☠️' : ''}${subject.stumbleT > 0 ? '〰️' : ''}${subject.heldBy ? '🤝' : ''}`,
+            `${subject.name.toUpperCase()} spd <b>${fmt(subject.spd)}</b> y <b>${fmt(subject.y, 2)}</b> hp <b>${Math.round(subject.hp)}</b> ${subject.state === 'ko' ? '☠️' : ''}${subject.knockT > 0 ? '😵' : ''}${subject.heldBy ? '🤝' : ''}`,
           );
         }
         rows.push(`bombs <b>${view.bombs.length}</b> · flags ${Object.values(view.flags ?? {}).map((f) => f.st).join('/')}${timeScale !== 1 ? ' · <b>SLOW-MO ×0.25</b>' : ''}`);
