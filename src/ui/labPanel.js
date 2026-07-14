@@ -75,7 +75,17 @@ export function createLabPanel(uiRoot, transport) {
           case 'impact': pushLog(`💢 impact dmg=<b>${ev.dmg}</b> (${ev.id === subject?.id ? 'subject' : ev.id === myId ? 'you' : ev.id})`); break;
           case 'gripBreak': pushLog('✋💨 grip broken'); break;
           case 'bodySlam': pushLog(`🎳 body slam Δv=<b>${ev.j}</b>`); break;
-          case 'bombOut': pushLog('💣 bomb out (fuse lit!)'); break;
+          case 'bombOut': pushLog(ev.kind && ev.kind !== 'normal' ? `💣 ${ev.kind} out` : '💣 bomb out (fuse lit!)'); break;
+          case 'powerup': pushLog(`🎁 powerup: <b>${ev.kind}</b>`); break;
+          case 'wearOff': pushLog(`⌛ ${ev.kind} wore off`); break;
+          case 'shieldHit': pushLog(`🛡️ shield hit (<b>${ev.hp}</b> left)`); break;
+          case 'shieldDown': pushLog('🛡️💥 shield down'); break;
+          case 'freeze': pushLog('🧊 frozen solid'); break;
+          case 'thaw': pushLog('💧 thawed'); break;
+          case 'shatter': pushLog('🧊💥 SHATTERED'); break;
+          case 'curse': pushLog('💀 cursed (5s to live)'); break;
+          case 'mineArm': pushLog('⚠️ mine armed'); break;
+          case 'stick': pushLog('🎯 sticky bomb attached'); break;
           case 'grabPlayer': pushLog('🤝 player grabbed'); break;
           case 'playerThrow': pushLog('🤾 player thrown'); break;
           case 'jump': pushLog('⬆️ jump'); break;

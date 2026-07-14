@@ -47,6 +47,12 @@ export const dojo = {
     blue: [{ x: 7, z: 0 }, { x: 9, z: 2 }],
   },
 
+  // powerup drops for lab testing — off the center lane so knockback
+  // measurements stay clean
+  powerupSpawns: [
+    { x: 0, z: -4 }, { x: 0, z: 4 }, { x: -12, z: 0 },
+  ],
+
   solids: [
     // collision test props, kept off the center lane
     { x: -11, z: -7, w: 1.4, d: 1.4, h: 1.4, kind: 'crate' },

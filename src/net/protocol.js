@@ -23,10 +23,18 @@ export function packState(st) {
       carryFlag: p.carryFlag, heldBomb: p.heldBomb,
       heldPlayer: p.heldPlayer, heldBy: p.heldBy,
       throwT: r2(p.throwT), punchT: r2(p.punchT), punchArm: p.punchArm,
+      shieldHp: Math.round(p.shieldHp), glovesT: r2(p.glovesT),
+      frozenT: r2(p.frozenT), curseT: r2(p.curseT),
+      mines: p.mines, bombKind: p.bombKind,
     })),
     bombs: st.bombs.map((b) => ({
-      id: b.id, x: r2(b.x), z: r2(b.z), y: r2(b.y),
-      vx: r2(b.vx), vz: r2(b.vz), fuse: r2(b.fuse), holder: b.holder,
+      id: b.id, kind: b.kind, x: r2(b.x), z: r2(b.z), y: r2(b.y),
+      vx: r2(b.vx), vz: r2(b.vz), holder: b.holder, stuckTo: b.stuckTo,
+      fuse: b.fuse == null ? null : r2(b.fuse), arm: r2(b.arm),
+    })),
+    powerups: (st.powerups ?? []).map((u) => ({
+      id: u.id, kind: u.kind,
+      x: r2(u.x), z: r2(u.z), y: r2(u.y), life: r2(u.life),
     })),
     flags: st.flags
       ? Object.fromEntries(Object.entries(st.flags).map(([team, f]) => [team, {

@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { buildLevel } from './level.js';
 import { CharacterView } from './characters.js';
 import { BombView } from './bombs.js';
+import { PowerupView } from './powerups.js';
 import { FlagView } from './flag.js';
 import { Effects } from './effects.js';
 import { TEAMS } from '../core/config.js';
@@ -19,6 +20,7 @@ export class World {
     this.effects = new Effects(scene);
     this.chars = new Map();
     this.bombViews = new Map();
+    this.powerupViews = new Map();
     this.flagViews = {
       red: new FlagView(scene, level, 'red'),
       blue: new FlagView(scene, level, 'blue'),
@@ -75,7 +77,7 @@ export class World {
       seenB.add(b.id);
       let bv = this.bombViews.get(b.id);
       if (!bv) {
-        bv = new BombView(this.scene);
+        bv = new BombView(this.scene, b);
         this.bombViews.set(b.id, bv);
       }
       bv.update(b, dt, this.time);
@@ -84,6 +86,23 @@ export class World {
       if (!seenB.has(id)) {
         bv.dispose();
         this.bombViews.delete(id);
+      }
+    }
+
+    const seenU = new Set();
+    for (const u of view.powerups ?? []) {
+      seenU.add(u.id);
+      let uv = this.powerupViews.get(u.id);
+      if (!uv) {
+        uv = new PowerupView(this.scene, u);
+        this.powerupViews.set(u.id, uv);
+      }
+      uv.update(u, dt, this.time);
+    }
+    for (const [id, uv] of this.powerupViews) {
+      if (!seenU.has(id)) {
+        uv.dispose();
+        this.powerupViews.delete(id);
       }
     }
 
@@ -143,6 +162,36 @@ export class World {
           break;
         case 'ko':
           this.effects.poof(ev.x, ev.z, '#ff9d8a');
+          break;
+        case 'powerupSpawn':
+          this.effects.poof(ev.x, ev.z, '#ffe9a8');
+          break;
+        case 'powerup':
+          this.effects.poof(ev.x, ev.z, ev.kind === 'curse' ? '#a24dd6' : '#b8ffb0');
+          break;
+        case 'powerupBoom':
+        case 'powerupExpire':
+          this.effects.poof(ev.x, ev.z, '#d8cfa8');
+          break;
+        case 'shieldHit':
+          this.effects.poof(ev.x, ev.z, '#9a86ff');
+          break;
+        case 'shieldDown':
+          this.effects.poof(ev.x, ev.z, '#6f52e0');
+          break;
+        case 'freeze':
+          this.effects.poof(ev.x, ev.z, '#aee4ff');
+          break;
+        case 'shatter': {
+          this.effects.poof(ev.x, ev.z, '#dff4ff');
+          if (myPos) {
+            const d = Math.hypot(ev.x - myPos.x, ev.z - myPos.z);
+            this.effects.addShake(Math.max(0, 0.25 - d * 0.02));
+          }
+          break;
+        }
+        case 'curse':
+          this.effects.poof(ev.x, ev.z, '#5b2a6e');
           break;
       }
     }

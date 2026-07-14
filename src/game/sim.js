@@ -15,14 +15,22 @@
 //     hand); pressing again throws it — running throws go far
 //   - blasts kick every body equally (mass-normalized) and pop them upward
 //   - impact damage: wall slams, hard landings, flying-body collisions
+//   - powerup boxes drop on level spawn points every 8s: boxing gloves,
+//     shields, triple/ice/impact/sticky bombs, land mines, med-packs and
+//     the curse (see config.powerups + docs/bombsquad-parity.md)
 //
 // State shape (everything JSON-serializable — this IS the network snapshot):
 //   players[]: { id, name, team, bot, cos, x, z, y, vx, vz, vy, face, hp,
 //                state('alive'|'ko'), respawn, invuln, knockT,
 //                carryFlag('red'|'blue'|null), heldBomb, heldPlayer, heldBy,
 //                heldT, throwT, punchCd, punchT, jumpCd, impactCd, gearSpd,
-//                koT, hurtT, spd }
-//   bombs[]:   { id, x, z, y, vx, vz, vy, fuse, holder, owner }
+//                koT, hurtT, spd,
+//                shieldHp, glovesT, frozenT, curseT, mines, bombKind,
+//                bombKindT, bombCount, tripleT }
+//   bombs[]:   { id, kind, x, z, y, vx, vz, vy, fuse(null=mine), arm,
+//                holder, owner, stuckTo }
+//   powerups[]: { id, kind, x, z, y, vx, vz, vy, life }  (+ puWave/puPend
+//                spawner state)
 //   flags:     owned by the active mode (see modes/ctf.js)
 //
 // Game modes plug in via an object with hooks:
@@ -64,6 +72,9 @@ export function createSim({ level, mode, config }) {
       winner: null,
       players: [],
       bombs: [],
+      powerups: [], // live powerup boxes
+      puWave: 0, // time until the next spawn wave (first wave drops at once)
+      puPend: [], // staggered per-point spawns queued within a wave
       flags: null,
     },
     events: [], // transient per-tick events, drained by the host
@@ -71,6 +82,7 @@ export function createSim({ level, mode, config }) {
     prevIn: new Map(), // last button state per player (edge detection)
     punchHits: new Map(), // per-swing hit sets (one hit per target per swing)
     spawnIdx: { red: 0, blue: 0 },
+    lastPowerup: null, // a med-pack always follows a curse box
   };
   mode.init(sim);
   return sim;
@@ -94,6 +106,10 @@ export function addPlayer(sim, { name, team, bot = false, cos }) {
     carryFlag: null, heldBomb: null, heldPlayer: null, heldBy: null,
     heldT: 9, throwT: 0, punchCd: 0, punchT: 0, punchArm: 0,
     jumpCd: 0, impactCd: 0, gearSpd: 0, koT: 0, hurtT: 0, spd: 0,
+    // powerup carry state (everything here is lost on death)
+    shieldHp: 0, glovesT: 0, frozenT: 0, curseT: 0, mines: 0,
+    bombKind: 'normal', bombKindT: 0,
+    bombCount: sim.config.bomb.perPlayer, tripleT: 0,
   };
   placeAtSpawn(sim, p);
   sim.state.players.push(p);
@@ -147,19 +163,20 @@ export function step(sim, inputs, dt) {
     if (s.overT <= 0) resetRound(sim);
   }
 
-  const frozen = s.phase !== 'play';
+  const paused = s.phase !== 'play';
   for (const p of s.players) {
-    updatePlayer(sim, p, inputs.get(p.id) ?? EMPTY_INPUT, dt, frozen);
+    updatePlayer(sim, p, inputs.get(p.id) ?? EMPTY_INPUT, dt, paused);
   }
   applyGrabs(sim, dt);
   playerCollisions(sim, s.players);
   updateBombs(sim, dt);
+  updatePowerups(sim, dt);
   sim.mode.tick(sim, dt);
 }
 
 // ------------------------------------------------------------------ players
 
-function updatePlayer(sim, p, i, dt, frozen) {
+function updatePlayer(sim, p, i, dt, paused) {
   const cfg = sim.config.player;
   p.throwT = Math.max(0, p.throwT - dt);
   p.punchCd = Math.max(0, p.punchCd - dt);
@@ -172,11 +189,45 @@ function updatePlayer(sim, p, i, dt, frozen) {
   if (p.lastHitByT <= 0) p.lastHitBy = null;
   p.heldT += dt;
 
+  // carried powerups wear off (spaz.py POWERUP_WEAR_OFF_TIME, 20s)
+  if (p.glovesT > 0) {
+    p.glovesT = Math.max(0, p.glovesT - dt);
+    if (!p.glovesT) emit(sim, { t: 'wearOff', id: p.id, kind: 'gloves' });
+  }
+  if (p.bombKindT > 0) {
+    p.bombKindT = Math.max(0, p.bombKindT - dt);
+    if (!p.bombKindT) {
+      emit(sim, { t: 'wearOff', id: p.id, kind: p.bombKind });
+      p.bombKind = 'normal';
+    }
+  }
+  if (p.tripleT > 0) {
+    p.tripleT = Math.max(0, p.tripleT - dt);
+    if (!p.tripleT) {
+      p.bombCount = sim.config.bomb.perPlayer;
+      emit(sim, { t: 'wearOff', id: p.id, kind: 'triple' });
+    }
+  }
+  if (p.frozenT > 0) {
+    p.frozenT = Math.max(0, p.frozenT - dt);
+    if (!p.frozenT) emit(sim, { t: 'thaw', id: p.id });
+  }
+  // the curse: a 5s heartbeat, then you go up in a blast — unless a
+  // med-pack saved you first
+  if (!paused && p.state === 'alive' && p.curseT > 0) {
+    p.curseT = Math.max(0, p.curseT - dt);
+    if (!p.curseT) {
+      koPlayer(sim, p, 'curse');
+      detonate(sim, p.x, p.z, Math.max(0, p.y), 'curse');
+      return;
+    }
+  }
+
   const onGround = p.y <= 0.001;
   // knockout wears off at full rate on the ground, half rate airborne
   // (BombSquad decrements every 5 steps grounded, 10 airborne)
   p.knockT = Math.max(0, p.knockT - dt * (onGround ? 1 : 0.5));
-  if (p.knockT > 0) p.punchT = 0; // a knockout cancels a mid-swing punch
+  if (p.knockT > 0 || p.frozenT > 0) p.punchT = 0; // knockout/freeze cancels a mid-swing punch
 
   if (p.state === 'ko') {
     p.koT += dt;
@@ -207,7 +258,7 @@ function updatePlayer(sim, p, i, dt, frozen) {
   const mutualGrapple = p.heldBy && p.heldPlayer === p.heldBy;
   let ctrl = onGround ? 1 : cfg.airControl;
   if (p.heldBy && !mutualGrapple) ctrl = 0; // hoisted overhead: a passenger
-  if (p.knockT > 0 || frozen) ctrl = 0; // out cold / round frozen
+  if (p.knockT > 0 || p.frozenT > 0 || paused) ctrl = 0; // out cold / frozen solid / round paused
 
   if (mlen > 0.01 && ctrl > 0) {
     const target = mlen * (cfg.walkSpeed + gear * run * (cfg.runSpeed - cfg.walkSpeed));
@@ -247,13 +298,13 @@ function updatePlayer(sim, p, i, dt, frozen) {
   let fx = 0, fz = 0;
   if (i.aiming && (i.ax || i.az)) { fx = i.ax; fz = i.az; }
   else if (mlen > 0.05) { fx = m.x; fz = m.z; }
-  if ((fx || fz) && p.knockT <= 0) p.face = angleLerp(p.face, Math.atan2(fx, fz), Math.min(1, 14 * dt));
+  if ((fx || fz) && p.knockT <= 0 && p.frozenT <= 0) p.face = angleLerp(p.face, Math.atan2(fx, fz), Math.min(1, 14 * dt));
   p.spd = Math.hypot(p.vx, p.vz);
 
   // live fist: the swing is a moving collider that connects mid-arc
   if (p.punchT > 0 && !p.heldBy) resolvePunch(sim, p);
 
-  if (frozen) return;
+  if (paused) return;
 
   const prev = sim.prevIn.get(p.id) ?? EMPTY_INPUT;
   const throwEdge = i.throw && !prev.throw;
@@ -262,7 +313,7 @@ function updatePlayer(sim, p, i, dt, frozen) {
   const jumpEdge = i.jump && !prev.jump;
   sim.prevIn.set(p.id, { throw: !!i.throw, grab: !!i.grab, punch: !!i.punch, jump: !!i.jump });
 
-  if (p.knockT > 0) return; // out cold: no actions
+  if (p.knockT > 0 || p.frozenT > 0) return; // out cold / frozen solid: no actions
 
   if (jumpEdge && onGround && p.jumpCd <= 0) {
     p.jumpCd = cfg.jumpCooldown;
@@ -395,18 +446,22 @@ export function breakGrabs(sim, p, vx = 0, vz = 0) {
 function doPunch(sim, p, i) {
   const cfg = sim.config.punch;
   if (p.punchCd > 0) return;
+  // boxing gloves: faster cooldown (400→300ms) and harder hits (spazfactory)
+  const gcfg = sim.config.powerups.gloves;
+  const cooldown = p.glovesT > 0 ? gcfg.cooldown : cfg.cooldown;
+  const power = p.glovesT > 0 ? gcfg.powerScale : 1;
 
   // held in someone's grip (overhead or grapple): hammer on the grabber —
   // bodies co-move so there's no momentum, just chip damage... but ANY
   // damage forces a drop, so one clean pummel breaks you free.
   if (p.heldBy) {
-    p.punchCd = cfg.cooldown;
+    p.punchCd = cooldown;
     p.punchT = cfg.swingTime;
     p.punchArm = p.punchArm ? 0 : 1;
     const holder = getP(sim, p.heldBy);
     emit(sim, { t: 'punch', id: p.id, x: p.x, z: p.z });
     if (holder && holder.state === 'alive') {
-      const dmg = cfg.dmgBase * 1.5;
+      const dmg = cfg.dmgBase * 1.5 * power;
       damagePlayer(sim, holder, dmg, 0, 0, 0, 'punch', p.id);
       emit(sim, { t: 'punchHit', id: p.id, target: holder.id, x: holder.x, z: holder.z, dmg: Math.round(dmg) });
     }
@@ -416,7 +471,7 @@ function doPunch(sim, p, i) {
   // BombSquad: no swinging while you're holding something
   if (p.carryFlag || p.heldBomb || p.heldPlayer) return;
 
-  p.punchCd = cfg.cooldown;
+  p.punchCd = cooldown;
   p.punchT = cfg.swingTime;
   p.punchArm = p.punchArm ? 0 : 1; // alternate fists: right, left, right...
   sim.punchHits.set(p.id, new Set());
@@ -445,6 +500,8 @@ function resolvePunch(sim, p) {
   const tNorm = Math.min(1, age / 0.2);
   const timing = 0.7 + 0.3 * (0.5 + 0.5 * Math.sin(tNorm * 2 * Math.PI - Math.PI / 2));
   const v3 = Math.hypot(p.vx, p.vz, p.vy); // jumps count toward momentum
+  // boxing gloves scale the whole hit — damage cap included (1.2→1.4)
+  const power = p.glovesT > 0 ? sim.config.powerups.gloves.powerScale : 1;
   const matP = sim.mats.player;
 
   for (const o of sim.state.players) {
@@ -453,7 +510,7 @@ function resolvePunch(sim, p) {
     if (Math.hypot(o.x - fx, o.z - fz) > cfg.fistRadius + matP.radius) continue;
     hits.add(o.id);
     // damage rides on body momentum — friendly fire is real in BombSquad
-    const dmg = Math.min(cfg.dmgCap, (cfg.dmgBase + cfg.dmgPerSpeed * v3) * timing);
+    const dmg = Math.min(cfg.dmgCap * power, (cfg.dmgBase + cfg.dmgPerSpeed * v3) * timing * power);
     // knockback follows the swing, blended with a radial shove, and pops up
     const rad = norm2(o.x - p.x, o.z - p.z);
     const kx = dir.x * 0.7 + rad.x * 0.3;
@@ -473,11 +530,19 @@ function resolvePunch(sim, p) {
   const vFist = cfg.swingSpeed + Math.hypot(p.vx, p.vz);
   const invFist = 1 / cfg.fistMass;
   for (const b of sim.state.bombs) {
-    if (b.holder || hits.has(b.id)) continue;
+    if (b.holder || b.stuckTo || hits.has(b.id)) continue;
     if (Math.hypot(b.x - fx, b.z - fz) > cfg.fistRadius + sim.mats.bomb.radius + 0.15) continue;
     hits.add(b.id);
     const j = ((1 + cfg.restitution) * vFist) / (invFist + invMass(sim.mats.bomb));
     applyImpulse(b, sim.mats.bomb, dir.x * j, dir.z * j, j * 0.25);
+  }
+  // powerup boxes get knocked around too (BombSquad: punches don't pop them)
+  for (const u of sim.state.powerups) {
+    if (hits.has(u.id)) continue;
+    if (Math.hypot(u.x - fx, u.z - fz) > cfg.fistRadius + sim.mats.box.radius + 0.15) continue;
+    hits.add(u.id);
+    const j = ((1 + cfg.restitution) * vFist) / (invFist + invMass(sim.mats.box));
+    applyImpulse(u, sim.mats.box, dir.x * j, dir.z * j, j * 0.25);
   }
   sim.mode.onPunchObject?.(sim, fx, fz, cfg.fistRadius + 0.45, dir, vFist, invFist);
 }
@@ -485,30 +550,43 @@ function resolvePunch(sim, p) {
 // Throw button, the BombSquad bomb button: with something in hand it hurls
 // it; empty-handed it pulls out a LIT bomb held overhead. The fuse starts
 // immediately and keeps burning in your hands — carry it too long and it
-// takes you with it. Only one live bomb per player until yours goes off.
+// takes you with it. Only one live bomb per player until yours goes off
+// (three with the triple-bombs powerup). Land mines come out first if you
+// carry any (spaz.py drop_bomb), and don't count against the bomb limit.
 function doThrow(sim, p, i) {
   if (p.carryFlag || p.heldBomb || p.heldPlayer) {
     throwHeld(sim, p, i);
     return;
   }
   const cfg = sim.config.bomb;
-  let live = 0;
-  for (const b of sim.state.bombs) if (b.owner === p.id) live++;
-  if (live >= cfg.perPlayer) return;
+  let kind;
+  if (p.mines > 0) {
+    p.mines--;
+    kind = 'mine';
+  } else {
+    let live = 0;
+    for (const b of sim.state.bombs) if (b.owner === p.id && b.kind !== 'mine') live++;
+    if (live >= p.bombCount) return;
+    kind = p.bombKind;
+  }
   const id = 'b' + sim.nextId++;
   sim.state.bombs.push({
     id,
+    kind,
     x: p.x + Math.sin(p.face) * 0.15,
     z: p.z + Math.cos(p.face) * 0.15,
     y: p.y + 2.05,
     vx: p.vx, vz: p.vz, vy: 0,
-    fuse: cfg.fuse,
+    // mines have no fuse at all; impact bombs get a long fallback one
+    fuse: kind === 'mine' ? null : kind === 'impact' ? cfg.impactFuse : cfg.fuse,
+    arm: kind === 'mine' ? cfg.mineArm : kind === 'impact' ? cfg.impactArm : kind === 'sticky' ? cfg.stickyArm : 0,
     holder: p.id,
     owner: p.id,
+    stuckTo: null,
   });
   p.heldBomb = id;
   p.heldT = 0;
-  emit(sim, { t: 'bombOut', id: p.id, x: p.x, z: p.z });
+  emit(sim, { t: 'bombOut', id: p.id, kind, x: p.x, z: p.z });
 }
 
 // The universal throw — BombSquad hurls whatever you hold (flag, bomb,
@@ -629,7 +707,12 @@ function updateBombs(sim, dt) {
   const matP = sim.mats.player;
   for (let i = s.bombs.length - 1; i >= 0; i--) {
     const b = s.bombs[i];
-    b.fuse -= dt; // the fuse burns whether held or flying
+    if (b.fuse != null) b.fuse -= dt; // the fuse burns whether held or flying
+    if (b.arm > 0) {
+      b.arm = Math.max(0, b.arm - dt);
+      if (!b.arm && b.kind === 'mine') emit(sim, { t: 'mineArm', x: b.x, z: b.z });
+    }
+    const armed = !b.arm;
 
     if (b.holder) {
       const p = getP(sim, b.holder);
@@ -642,11 +725,38 @@ function updateBombs(sim, dt) {
         b.y = p.y + 2.05;
         b.vx = p.vx; b.vz = p.vz; b.vy = 0;
       }
+    } else if (b.stuckTo) {
+      // a sticky bomb that found a victim rides them to the end
+      const t = getP(sim, b.stuckTo);
+      if (t) {
+        b.x = t.x; b.z = t.z; b.y = t.y + 1.15;
+        b.vx = t.vx; b.vz = t.vz; b.vy = 0;
+      } else {
+        b.stuckTo = null;
+      }
     }
 
-    if (!b.holder) {
+    if (!b.holder && !b.stuckTo) {
       const out = integrateBody(sim.level, sim.world, b, matB, dt, { restY: matB.radius });
       if (out.bounced && out.impact > 3) emit(sim, { t: 'bounce', x: b.x, z: b.z });
+
+      let boom = false;
+      // impact bombs: once armed, ANY contact sets them off — including
+      // the floor they land on (bomb.py: explode on collision)
+      if (b.kind === 'impact' && armed && (out.wallImpact > 0 || out.floorImpact > 0)) boom = true;
+      // sticky bombs splat where they land instead of bouncing on
+      if (b.kind === 'sticky' && armed && (out.floorImpact > 0 || out.wallImpact > 0)) {
+        b.vx = 0; b.vz = 0; b.vy = 0;
+      }
+      // armed land mines are proximity traps: ANY body touching one —
+      // its owner included — sets it off (bomb.py excludes only mines)
+      if (b.kind === 'mine' && armed) {
+        for (const p of s.players) {
+          if (p.state !== 'alive') continue;
+          if (Math.abs(p.y - b.y) > 1.2) continue;
+          if (Math.hypot(p.x - b.x, p.z - b.z) < matB.radius + matP.radius + 0.05) { boom = true; break; }
+        }
+      }
 
       // bomb <-> player contact: real impulse exchange. Walking into a
       // resting bomb KICKS it ahead of you; a thrown bomb bonks whoever it
@@ -654,7 +764,20 @@ function updateBombs(sim, dt) {
       for (const p of s.players) {
         if (p.state !== 'alive') continue;
         const j = collideBodies(b, matB, p, matP, { maxYGap: 1.4 });
+        if (j <= 0) continue;
         if (j > 2.5) emit(sim, { t: 'bounce', x: b.x, z: b.z });
+        if (!armed) continue;
+        if (b.kind === 'impact' && p.id !== b.owner) boom = true;
+        if (b.kind === 'sticky' && !b.stuckTo) {
+          b.stuckTo = p.id;
+          emit(sim, { t: 'stick', id: p.id, x: b.x, z: b.z });
+        }
+      }
+
+      if (boom) {
+        s.bombs.splice(i, 1);
+        explode(sim, b);
+        continue;
       }
 
       if (b.y < sim.config.world.fallY) {
@@ -663,7 +786,7 @@ function updateBombs(sim, dt) {
       }
     }
 
-    if (b.fuse <= 0) {
+    if (b.fuse != null && b.fuse <= 0) {
       s.bombs.splice(i, 1);
       explode(sim, b);
     }
@@ -671,13 +794,24 @@ function updateBombs(sim, dt) {
 }
 
 function explode(sim, b) {
-  const cfg = sim.config.bomb;
-  const s = sim.state;
   if (b.holder) {
     const p = getP(sim, b.holder);
     if (p) p.heldBomb = null;
   }
-  emit(sim, { t: 'explode', x: b.x, z: b.z, y: Math.max(0, b.y) });
+  detonate(sim, b.x, b.z, Math.max(0, b.y), b.kind ?? 'normal', b.owner ?? null);
+}
+
+// One blast, any source — bombs of every kind and the curse. Per-kind
+// radius/damage/kick multipliers live in config.bomb.kinds; ice blasts
+// additionally FREEZE whoever they reach (damage lands first, exactly as
+// BombSquad's Blast sends HitMessage then FreezeMessage). `by` (the
+// attacker id for kill attribution) is optional — bombs pass their owner,
+// the curse's self-detonation leaves it null (no one else did this to you).
+export function detonate(sim, x, z, y, kind, by = null) {
+  const cfg = sim.config.bomb;
+  const k = cfg.kinds[kind] ?? cfg.kinds.normal;
+  const s = sim.state;
+  emit(sim, { t: 'explode', x, z, y, kind });
 
   // players: linear-falloff damage to ZERO at the edge, point-blank is
   // lethal; the velocity kick is the same for every body (mass-normalized)
@@ -685,11 +819,11 @@ function explode(sim, b) {
   // Friendly fire is real: your own and your teammates' bombs hurt.
   for (const p of s.players) {
     if (p.state !== 'alive') continue;
-    const dx = p.x - b.x;
-    const dz = p.z - b.z;
+    const dx = p.x - x;
+    const dz = p.z - z;
     const d = Math.hypot(dx, dz);
-    if (d >= cfg.blastRadius || Math.abs(p.y + 0.8 - b.y) > 3) continue;
-    const t = 1 - d / cfg.blastRadius;
+    if (d >= k.radius || Math.abs(p.y + 0.8 - y) > 3) continue;
+    const t = 1 - d / k.radius;
     let nx = dx / (d || 1);
     let nz = dz / (d || 1);
     if (d < 0.01) {
@@ -698,37 +832,190 @@ function explode(sim, b) {
     }
     damagePlayer(
       sim, p,
-      cfg.maxDamage * t,
-      nx * cfg.blastDvXZ * t,
-      nz * cfg.blastDvXZ * t,
-      cfg.blastDvY * t,
+      cfg.maxDamage * k.dmgMult * t,
+      nx * cfg.blastDvXZ * k.dvMult * t,
+      nz * cfg.blastDvXZ * k.dvMult * t,
+      cfg.blastDvY * k.dvMult * t,
       'bomb',
-      b.owner ?? null,
+      by,
     );
+    if (k.freezes) freezePlayer(sim, p);
   }
 
   // bombs caught in the blast get kicked and cook off 0.1–0.2s later —
-  // chain reactions (held bombs chain too, but ride their holder)
+  // chain reactions (held bombs chain too, but ride their holder; even
+  // fuseless mines are set off this way)
   for (const ob of s.bombs) {
-    const d = Math.hypot(ob.x - b.x, ob.z - b.z);
-    if (d >= cfg.blastRadius) continue;
-    if (!ob.holder) blastKick(ob, b.x, b.z, cfg.blastRadius, cfg.blastDvXZ, cfg.blastDvY * 0.6);
-    ob.fuse = Math.min(ob.fuse, cfg.chainFuseMin + Math.random() * (cfg.chainFuseMax - cfg.chainFuseMin));
+    const d = Math.hypot(ob.x - x, ob.z - z);
+    if (d >= k.radius) continue;
+    if (!ob.holder && !ob.stuckTo) blastKick(ob, x, z, k.radius, cfg.blastDvXZ * k.dvMult, cfg.blastDvY * k.dvMult * 0.6);
+    ob.fuse = Math.min(ob.fuse ?? 99, cfg.chainFuseMin + Math.random() * (cfg.chainFuseMax - cfg.chainFuseMin));
+  }
+
+  // powerup boxes caught in a blast are destroyed (powerupbox.py: any
+  // non-punch hit is fatal to the box)
+  for (let i = s.powerups.length - 1; i >= 0; i--) {
+    const u = s.powerups[i];
+    if (Math.hypot(u.x - x, u.z - z) >= k.radius) continue;
+    s.powerups.splice(i, 1);
+    emit(sim, { t: 'powerupBoom', id: u.id, x: u.x, z: u.z });
   }
 
   // let the mode blast its own objects (flags) around
-  sim.mode.onExplosion?.(sim, b.x, b.z, cfg.blastRadius);
+  sim.mode.onExplosion?.(sim, x, z, k.radius);
+}
+
+// ----------------------------------------------------------------- powerups
+
+// Weighted pick from the BombSquad distribution, with its one special rule:
+// right after a curse box, the next box is always a med-pack.
+function pickPowerupType(sim) {
+  const cfg = sim.config.powerups;
+  if (sim.lastPowerup === 'curse') {
+    sim.lastPowerup = 'health';
+    return 'health';
+  }
+  let total = 0;
+  for (const [, w] of cfg.distribution) total += w;
+  let r = Math.random() * total;
+  for (const [kind, w] of cfg.distribution) {
+    r -= w;
+    if (r < 0) {
+      sim.lastPowerup = kind;
+      return kind;
+    }
+  }
+  return 'triple';
+}
+
+// Powerup boxes: dropped in waves on the level's powerupSpawns points
+// (every 8s, staggered 0.4s apart, first wave the moment play starts),
+// expiring after 7s if nobody takes them. The boxes are physics props —
+// they can be punched around and blasts destroy them — and are collected
+// by simply TOUCHING them (powerupbox.py's accept-on-contact material).
+function updatePowerups(sim, dt) {
+  const s = sim.state;
+  const pts = sim.level.powerupSpawns;
+  const cfg = sim.config.powerups;
+  if (!pts?.length) return;
+
+  if (s.phase === 'play') {
+    s.puWave -= dt;
+    if (s.puWave <= 0) {
+      s.puWave += cfg.interval;
+      for (let i = 0; i < pts.length; i++) s.puPend.push({ t: i * cfg.stagger, i });
+    }
+  }
+  for (let i = s.puPend.length - 1; i >= 0; i--) {
+    const q = s.puPend[i];
+    q.t -= dt;
+    if (q.t > 0) continue;
+    s.puPend.splice(i, 1);
+    const pt = pts[q.i];
+    const box = {
+      id: 'u' + sim.nextId++,
+      kind: pickPowerupType(sim),
+      x: pt.x, z: pt.z, y: 2.4, // drops in from above
+      vx: 0, vz: 0, vy: 0,
+      life: cfg.boxLife,
+    };
+    s.powerups.push(box);
+    emit(sim, { t: 'powerupSpawn', id: box.id, kind: box.kind, x: box.x, z: box.z });
+  }
+
+  const mat = sim.mats.box;
+  const matP = sim.mats.player;
+  for (let i = s.powerups.length - 1; i >= 0; i--) {
+    const u = s.powerups[i];
+    u.life -= dt;
+    if (u.life <= 0) {
+      s.powerups.splice(i, 1);
+      emit(sim, { t: 'powerupExpire', id: u.id, x: u.x, z: u.z });
+      continue;
+    }
+    integrateBody(sim.level, sim.world, u, mat, dt, { restY: mat.radius });
+    if (u.y < sim.config.world.fallY) {
+      s.powerups.splice(i, 1);
+      continue;
+    }
+    for (const p of s.players) {
+      if (p.state !== 'alive') continue;
+      if (Math.abs(p.y - u.y) > 1.4) continue;
+      if (Math.hypot(p.x - u.x, p.z - u.z) > mat.radius + matP.radius) continue;
+      s.powerups.splice(i, 1);
+      grantPowerup(sim, p, u.kind);
+      break;
+    }
+  }
+}
+
+// Apply a powerup to a player (spaz.py PowerupMessage handling). Exported
+// for the smoke harness — grabbing a box in-game routes through here too.
+export function grantPowerup(sim, p, kind) {
+  const cfg = sim.config.powerups;
+  switch (kind) {
+    case 'triple': // three live bombs at once, for a while
+      p.bombCount = 3;
+      p.tripleT = cfg.wearOff;
+      break;
+    case 'ice':
+    case 'impact':
+    case 'sticky': // your bomb button pulls this kind, for a while
+      p.bombKind = kind;
+      p.bombKindT = cfg.wearOff;
+      break;
+    case 'mines': // ammo, not a timer: +3, carried max 3
+      p.mines = Math.min(p.mines + cfg.mines.count, cfg.mines.count);
+      break;
+    case 'gloves':
+      p.glovesT = cfg.wearOff;
+      break;
+    case 'shield':
+      p.shieldHp = cfg.shield.hp;
+      break;
+    case 'health': // full heal — and the only cure for the curse
+      p.hp = sim.config.player.hp;
+      p.curseT = 0;
+      break;
+    case 'curse':
+      if (p.curseT <= 0) emit(sim, { t: 'curse', id: p.id, name: p.name, x: p.x, z: p.z });
+      p.curseT = cfg.curse.time;
+      break;
+  }
+  emit(sim, { t: 'powerup', id: p.id, kind, x: p.x, z: p.z });
+}
+
+// Ice-blast freeze: 5 seconds as a statue. Shields and spawn protection
+// block it (spaz.py FreezeMessage); a hard hit while frozen SHATTERS you.
+function freezePlayer(sim, p) {
+  if (p.state !== 'alive' || p.invuln > 0 || p.shieldHp > 0) return;
+  if (p.frozenT <= 0) emit(sim, { t: 'freeze', id: p.id, x: p.x, z: p.z });
+  p.frozenT = sim.config.powerups.freeze.time;
 }
 
 // All damage funnels through here with a velocity kick (Δv). BombSquad
 // rules: ANY damage drops whatever the target is holding, and a single hit
 // past the knockout threshold puts them out cold — an unconscious ragdoll
-// that wakes up with its remaining hp.
+// that wakes up with its remaining hp. A shield eats hits FIRST — damage
+// and knockback both — and only the breaking hit's overshoot beyond the
+// spillover threshold reaches the player (spaz.py / spazfactory.py).
 export function damagePlayer(sim, p, dmg, dvx, dvz, dvy, cause, by = null) {
   if (p.state !== 'alive' || p.invuln > 0) return;
   // credit a real hit to its source (never self; env/self impacts pass by=null
   // and must PRESERVE whoever last hit us, so a shove-off-the-edge gets credited)
   if (by && by !== p.id) { p.lastHitBy = by; p.lastHitByT = HIT_CREDIT; }
+  if (p.shieldHp > 0 && dmg > 0) {
+    const spill = sim.config.powerups.shield.spillover;
+    p.shieldHp -= dmg;
+    emit(sim, { t: 'shieldHit', id: p.id, hp: Math.max(0, Math.round(p.shieldHp)), x: p.x, z: p.z });
+    if (p.shieldHp > 0) return; // good job, shield
+    const leftover = -p.shieldHp;
+    p.shieldHp = 0;
+    emit(sim, { t: 'shieldDown', id: p.id, x: p.x, z: p.z });
+    if (leftover <= spill) return; // the shield died so you didn't
+    const ratio = (leftover - spill) / dmg;
+    dmg *= ratio; dvx *= ratio; dvz *= ratio; dvy *= ratio;
+  }
   p.hp -= dmg;
   p.hurtT = 1.0; // brief hit-flash window (no regen — damage is permanent)
   p.vx += dvx;
@@ -738,6 +1025,12 @@ export function damagePlayer(sim, p, dmg, dvx, dvz, dvy, cause, by = null) {
     p.y = Math.max(p.y, 0.02);
   }
   if (dmg > 0) breakGrabs(sim, p, p.vx, p.vz);
+  // frozen solid: a hard-enough (or lethal) hit shatters you outright
+  if (p.frozenT > 0 && (dmg >= sim.config.powerups.freeze.shatterDamage || p.hp <= 0)) {
+    emit(sim, { t: 'shatter', id: p.id, x: p.x, z: p.z });
+    koPlayer(sim, p, 'shatter');
+    return;
+  }
   const k = sim.config.player.knockout;
   const units = Math.min(k.maxUnits, dmg * k.unitsPerDamage - k.baseUnits);
   if (units >= 1 && p.hp > 0) {
@@ -769,10 +1062,26 @@ function koPlayer(sim, p, cause) {
   p.hp = 0;
   p.koT = 0;
   p.knockT = 0;
+  p.shieldHp = 0; // the shield dies with its owner
+  p.curseT = 0;
+  p.frozenT = 0;
   p.respawn = sim.config.player.respawnTime;
   breakGrabs(sim, p, p.vx, p.vz);
   sim.mode.onKO?.(sim, p);
   emit(sim, { t: 'ko', id: p.id, name: p.name, team: p.team, cause, x: p.x, z: p.z });
+}
+
+// death loses every powerup — a respawned spaz starts clean (BombSquad)
+function clearPowerups(sim, p) {
+  p.shieldHp = 0;
+  p.glovesT = 0;
+  p.frozenT = 0;
+  p.curseT = 0;
+  p.mines = 0;
+  p.bombKind = 'normal';
+  p.bombKindT = 0;
+  p.bombCount = sim.config.bomb.perPlayer;
+  p.tripleT = 0;
 }
 
 function respawnPlayer(sim, p) {
@@ -789,6 +1098,7 @@ function respawnPlayer(sim, p) {
   p.koT = 0;
   p.lastHitBy = null;
   p.lastHitByT = 0;
+  clearPowerups(sim, p);
   emit(sim, { t: 'spawn', id: p.id, team: p.team, x: p.x, z: p.z });
 }
 
@@ -811,6 +1121,9 @@ export function resetRound(sim) {
   s.scores = { red: 0, blue: 0 };
   s.winner = null;
   s.bombs = [];
+  s.powerups = [];
+  s.puWave = 0;
+  s.puPend = [];
   for (const p of s.players) {
     p.state = 'alive';
     p.hp = sim.config.player.hp;
@@ -825,6 +1138,7 @@ export function resetRound(sim) {
     p.jumpCd = 0; p.impactCd = 0;
     p.lastHitBy = null; p.lastHitByT = 0;
     p.invuln = sim.config.player.invulnTime;
+    clearPowerups(sim, p);
     placeAtSpawn(sim, p);
   }
   sim.mode.init(sim);

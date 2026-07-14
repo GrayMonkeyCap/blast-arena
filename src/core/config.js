@@ -28,6 +28,10 @@ export const CONFIG = {
       // the flag: light cylinder (BombSquad kFlagDensity 1.0, r=0.3 h=1.0),
       // high friction — slides briefly, then plants itself
       flag: { mass: 1.0, radius: 0.4, restitution: 0.3, bounceMin: 3, friction: 0.85, wallFriction: 0.4, linDamp: 0.006 },
+      // powerup boxes: light crates — blasts destroy them, punches send
+      // them skidding (BombSquad boxes get knocked around but not popped
+      // by fists)
+      box: { mass: 0.6, radius: 0.42, restitution: 0.25, bounceMin: 2, friction: 0.75, wallFriction: 0.3, linDamp: 0.004 },
     },
   },
 
@@ -141,6 +145,57 @@ export const CONFIG = {
     // aim-distance → throw-power mapping for the UI (cursor/drag distance)
     aimRangeMin: 2,
     aimRangeMax: 12,
+    // Per-kind blast tables (bomb.py Blast: radius 2.0 base with per-type
+    // multipliers ice ×1.2 / impact ×0.7 / land_mine ×0.7; magnitude 2000
+    // base with ice ×0.5 / land_mine ×2.5). Radii carry our +0.5 body-reach
+    // allowance; dmg/dv multipliers scale maxDamage and blastDv* above.
+    // 'curse' is the 5s-countdown self-destruct (blast_radius 3.0, normal
+    // magnitude). Ice blasts also FREEZE everyone they reach.
+    kinds: {
+      normal: { radius: 2.5, dmgMult: 1, dvMult: 1 },
+      sticky: { radius: 2.5, dmgMult: 1, dvMult: 1 },
+      impact: { radius: 1.9, dmgMult: 1, dvMult: 1 },
+      ice: { radius: 2.9, dmgMult: 0.5, dvMult: 0.5, freezes: true },
+      mine: { radius: 1.9, dmgMult: 2.5, dvMult: 2.5 },
+      curse: { radius: 3.5, dmgMult: 1, dvMult: 1 },
+    },
+    impactFuse: 20, // impact bombs: no real fuse, a long fallback (bomb.py 20s)
+    impactArm: 0.2, // ...armed 200ms after being pulled; then ANY contact detonates
+    mineArm: 1.25, // land mines arm 1.25s after being pulled (bomb.py)
+    stickyArm: 0.25, // sticky bombs start sticking 250ms in (stick_to_owner delay)
+  },
+
+  // Powerups (powerupbox.py / powerup.py / spaz.py). Boxes drop on the
+  // level's powerupSpawns points every `interval` seconds (staggered
+  // `stagger` apart), flash at `boxFlash` and vanish at `boxLife` if
+  // untouched. Touching a box grants it instantly; blasts destroy boxes;
+  // punches only knock them around. Carried powerups (gloves, special
+  // bombs, triple) wear off after 20s; death loses everything.
+  powerups: {
+    interval: 8.0, // DEFAULT_POWERUP_INTERVAL
+    stagger: 0.4, // per-spawn-point delay within a wave
+    boxLife: 7.0, // box expires (interval − 1.0)
+    boxFlash: 5.5, // box starts flashing (interval − 2.5)
+    wearOff: 20, // POWERUP_WEAR_OFF_TIME (gloves / bomb types / triple)
+    wearOffFlash: 2, // visuals flash for the final 2s
+    // get_default_powerup_distribution() weights; a curse box is always
+    // followed by a med-pack (powerupbox.py's little act of mercy)
+    distribution: [
+      ['triple', 3], ['ice', 3], ['gloves', 3], ['impact', 3],
+      ['mines', 2], ['sticky', 3], ['shield', 2], ['health', 1], ['curse', 1],
+    ],
+    // boxing gloves: faster AND harder punches (spazfactory.py:
+    // cooldown 400→300ms, punch_power_scale 1.2→1.4)
+    gloves: { cooldown: 0.3, powerScale: 1.4 / 1.2 },
+    // energy shield: absorbs hits (damage AND knockback) until it breaks.
+    // BombSquad 650 shield hp, spillover 500 (÷10 on our scale): only the
+    // damage beyond hp+spillover in the breaking hit reaches the player.
+    shield: { hp: 65, spillover: 50 },
+    mines: { count: 3 }, // +3 land mines, carried max 3
+    curse: { time: 5.0 }, // 5s heartbeat, then the 'curse' blast — unless you find a med-pack
+    // frozen solid for 5s; any hit ≥ shatterDamage (or a lethal one)
+    // shatters you outright (spaz.py: damage > 200 on the 1000 scale)
+    freeze: { time: 5.0, shatterDamage: 20 },
   },
 
   // Two-flag CTF rules (capturetheflag.py defaults). The flag's physical
