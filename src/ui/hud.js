@@ -93,6 +93,7 @@ export function createHud(uiRoot, { onExit, onMute, muted }) {
 
       // per-team flag status: solid = home, blink = loose, hollow-pulse =
       // being carried by the enemy (you can't score till it's back!)
+      flagInd.style.display = view.flags ? '' : 'none';
       if (view.flags) {
         for (const team of ['red', 'blue']) {
           const f = view.flags[team];
@@ -146,6 +147,10 @@ export function createHud(uiRoot, { onExit, onMute, muted }) {
         const p = view.players.find((p) => p.id === id);
         return p ? `<b style="color:${TEAMS[p.team].color}">${p.name}</b>` : 'Someone';
       };
+      const tag = (n, team) => `<b style="color:${TEAMS[team]?.color ?? '#fff'}">${n ?? 'Someone'}</b>`;
+      // Death Match emits a `frag` alongside the generic `ko` for the same
+      // death — suppress the generic line so the feed doesn't double up.
+      const fragged = new Set(events.filter((e) => e.t === 'frag').map((e) => e.victim));
       for (const ev of events) {
         switch (ev.t) {
           case 'flagSteal':
@@ -173,10 +178,18 @@ export function createHud(uiRoot, { onExit, onMute, muted }) {
             showCenter('CAPTURE!', `goal-${ev.team}`, 1500);
             break;
           case 'ko':
+            if (fragged.has(ev.id)) break;
             pushFeed(
               ev.cause === 'fall' ? `🕳️ ${name(ev)} fell into the void`
               : ev.cause === 'punch' ? `👊 ${name(ev)} got knocked out`
               : `💥 ${name(ev)} was blown up`,
+            );
+            break;
+          case 'frag':
+            pushFeed(
+              ev.killerName
+                ? `⚔️ ${tag(ev.killerName, ev.killerTeam)} fragged ${tag(ev.victimName, ev.victimTeam)}`
+                : `💀 ${tag(ev.victimName, ev.victimTeam)} self-destructed`,
             );
             break;
           case 'playerThrow':

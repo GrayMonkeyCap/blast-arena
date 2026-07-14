@@ -116,6 +116,13 @@ export class FlagView {
     this.cloth.material.emissive.setScalar(urgent * 0.3);
   }
 
+  // Death Match (and any other flagless mode) has no flags to show — hide
+  // both the banner and its base stand/beacon.
+  setVisible(v) {
+    this.group.visible = v;
+    this.dais.visible = v;
+  }
+
   dispose() {
     this.scene.remove(this.group);
     this.scene.remove(this.dais);

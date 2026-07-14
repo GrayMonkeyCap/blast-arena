@@ -3,6 +3,7 @@
 // levels through this map — nothing else needs to change.
 import { foundry } from './foundry.js';
 import { dojo } from './dojo.js';
+import { skyhaven } from './skyhaven.js';
 
-export const LEVELS = { foundry, dojo };
+export const LEVELS = { foundry, dojo, skyhaven };
 export const DEFAULT_LEVEL = 'foundry';

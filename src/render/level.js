@@ -5,6 +5,22 @@
 import * as THREE from 'three';
 import { TEAMS } from '../core/config.js';
 import { toonMat, toonGradient } from './characters.js';
+import {
+  makeStone, makeBlock, makeColumn, makeBarrel, makeRock, makeLog,
+  makeArch, makeTree, makeLantern, makeScaffold, makePowerupPad, makePond,
+  makeZone, makeEdge, makeRubble, makeFlowers, makeSteppingStones,
+  makeCloudSea, makeFloatingIsland, makePeak, makeWaterfall,
+} from './props.js';
+
+// solid `kind`s built by a single props.js function (theme, s) => Object3D
+const PROP_SOLIDS = {
+  stone: makeStone,
+  block: makeBlock,
+  column: makeColumn,
+  barrel: makeBarrel,
+  rock: makeRock,
+  log: makeLog,
+};
 
 function canvasTex(size, draw, repeat) {
   const c = document.createElement('canvas');
@@ -89,6 +105,12 @@ export function buildLevel(scene, level, { touch }) {
   skirt.position.y = -4.1;
   group.add(skirt);
 
+  // tinted zone floor patches — added early (right after the floor) so every
+  // other prop below draws over them, and so they read from the top-down cam
+  for (const zone of level.decor?.zones ?? []) {
+    group.add(makeZone(theme, zone));
+  }
+
   // field markings
   const lineMat = new THREE.MeshBasicMaterial({ color: theme.line, transparent: true, opacity: 0.4, depthWrite: false });
   const midline = new THREE.Mesh(new THREE.PlaneGeometry(0.18, d - 1), lineMat);
@@ -132,6 +154,12 @@ export function buildLevel(scene, level, { touch }) {
   const crateMat = new THREE.MeshStandardMaterial({ map: crateTexture(theme), roughness: 0.85 });
   for (const s of level.solids) {
     let mesh;
+    if (PROP_SOLIDS[s.kind]) {
+      // multi-part low-poly builders from props.js (stone/block/column/
+      // barrel/rock/log) — already positioned and shadow-tagged, just add
+      group.add(PROP_SOLIDS[s.kind](theme, s));
+      continue;
+    }
     if (s.kind === 'rail') {
       // post-and-bar guard rail
       const rail = new THREE.Group();
@@ -221,21 +249,64 @@ export function buildLevel(scene, level, { touch }) {
     group.add(pole, cloth);
   }
 
-  // starfield void below/around the platform
-  const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(260 * 3);
-  for (let i = 0; i < 260; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = 45 + Math.random() * 70;
-    starPos[i * 3] = Math.cos(a) * r;
-    starPos[i * 3 + 1] = -30 + Math.random() * 55;
-    starPos[i * 3 + 2] = Math.sin(a) * r;
+  // stone archways (ruins)
+  for (const a of level.decor?.arches ?? []) group.add(makeArch(theme, a));
+
+  // stylized trees (garden trunks double up on `column` solids where paired)
+  for (const t of level.decor?.trees ?? []) group.add(makeTree(theme, t));
+
+  // stone garden lanterns
+  for (const l of level.decor?.lanterns ?? []) group.add(makeLantern(theme, l, touch));
+
+  // scattered rubble — one instanced mesh for every rock
+  const rubble = makeRubble(theme, level.decor?.rubble ?? []);
+  if (rubble) group.add(rubble);
+
+  // flower clusters — one instanced mesh, bright varied colors per instance
+  const flowers = makeFlowers(theme, level.decor?.flowers ?? []);
+  if (flowers) group.add(flowers);
+
+  // stepping stone discs — one instanced mesh
+  const steppingStones = makeSteppingStones(theme, level.decor?.steppingStones ?? []);
+  if (steppingStones) group.add(steppingStones);
+
+  // decorative water — visual only, never a solid
+  for (const p of level.decor?.ponds ?? []) group.add(makePond(theme, p));
+
+  // wooden scaffolding (watchtower yard)
+  for (const sc of level.decor?.scaffold ?? []) group.add(makeScaffold(theme, sc));
+
+  // powerup spawn-pad markers (the powerup system itself isn't built yet)
+  for (const pu of level.decor?.powerups ?? []) group.add(makePowerupPad(theme, pu, touch));
+
+  // broken cliff-rim markers along the lethal boundary
+  for (const e of level.decor?.edges ?? []) group.add(makeEdge(theme, e));
+
+  if (level.decor?.background) {
+    // low-detail distant scenery in a bright sea of clouds — replaces the
+    // dark-void starfield, which looks wrong against a bright sky
+    const bg = level.decor.background;
+    group.add(makeCloudSea(theme, bg));
+    for (const isl of bg.islands ?? []) group.add(makeFloatingIsland(theme, isl));
+    for (const pk of bg.peaks ?? []) group.add(makePeak(theme, pk));
+    for (const wf of bg.waterfalls ?? []) group.add(makeWaterfall(theme, wf));
+  } else {
+    // starfield void below/around the platform
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = new Float32Array(260 * 3);
+    for (let i = 0; i < 260; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 45 + Math.random() * 70;
+      starPos[i * 3] = Math.cos(a) * r;
+      starPos[i * 3 + 1] = -30 + Math.random() * 55;
+      starPos[i * 3 + 2] = Math.sin(a) * r;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+      color: '#8fb3ff', size: 0.4, transparent: true, opacity: 0.7, fog: false,
+    }));
+    group.add(stars);
   }
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
-    color: '#8fb3ff', size: 0.4, transparent: true, opacity: 0.7, fog: false,
-  }));
-  group.add(stars);
 
   scene.add(group);
   return group;

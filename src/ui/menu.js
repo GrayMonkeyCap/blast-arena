@@ -23,10 +23,12 @@ export function createMenu(uiRoot, profile, { onPlayLocal, onPlayOnline, onPlayL
 
       <div class="field"><span>HAT</span><div class="hat-row"></div></div>
       <div class="field"><span>SKIN</span><div class="skin-row"></div></div>
+      <div class="field"><span>MODE</span><div class="mode-row"></div></div>
+      <div class="field"><span>ARENA</span><div class="level-row"></div></div>
 
       <div class="level-card">
         <div class="level-name">📍 ${level.name}</div>
-        <div class="level-desc">${level.description} · 2v2 · first to 3 captures</div>
+        <div class="level-desc"></div>
       </div>
 
       <button class="play-btn">▶&nbsp; PLAY VS BOTS</button>
@@ -57,7 +59,79 @@ export function createMenu(uiRoot, profile, { onPlayLocal, onPlayOnline, onPlayL
   const nameInput = el.querySelector('.name-input');
   const hatRow = el.querySelector('.hat-row');
   const skinRow = el.querySelector('.skin-row');
+  const modeRow = el.querySelector('.mode-row');
+  const levelRow = el.querySelector('.level-row');
+  const levelName = el.querySelector('.level-name');
+  const levelDesc = el.querySelector('.level-desc');
   const err = el.querySelector('.menu-err');
+
+  const MODES = [
+    { id: 'ctf', label: '🚩 Capture the Flag', desc: '2v2 · first to 3 captures' },
+    { id: 'deathmatch', label: '💀 Death Match', desc: '2v2 · frag to win' },
+  ];
+  let selectedMode = 'ctf';
+  let selectedLevel = DEFAULT_LEVEL;
+
+  modeRow.style.display = 'flex';
+  modeRow.style.gap = '8px';
+  modeRow.style.flexWrap = 'wrap';
+  levelRow.style.display = 'flex';
+  levelRow.style.gap = '8px';
+  levelRow.style.flexWrap = 'wrap';
+
+  function updateLevelDesc() {
+    const mode = MODES.find((m) => m.id === selectedMode) ?? MODES[0];
+    const lvl = LEVELS[selectedLevel] ?? level;
+    levelName.textContent = `📍 ${lvl.name}`;
+    levelDesc.textContent = `${lvl.description} · ${mode.desc}`;
+  }
+
+  function renderModeRow() {
+    modeRow.innerHTML = '';
+    for (const mode of MODES) {
+      const b = document.createElement('button');
+      b.className = `chip ${selectedMode === mode.id ? 'sel' : ''}`;
+      b.textContent = mode.label;
+      b.style.width = 'auto';
+      b.style.height = 'auto';
+      b.style.fontSize = '13px';
+      b.style.padding = '10px 14px';
+      b.style.whiteSpace = 'nowrap';
+      b.addEventListener('click', () => {
+        if (selectedMode === mode.id) return;
+        selectedMode = mode.id;
+        onClickSound?.();
+        renderModeRow();
+        updateLevelDesc();
+      });
+      modeRow.appendChild(b);
+    }
+  }
+  renderModeRow();
+
+  function renderLevelRow() {
+    levelRow.innerHTML = '';
+    for (const lvl of Object.values(LEVELS)) {
+      const b = document.createElement('button');
+      b.className = `chip ${selectedLevel === lvl.id ? 'sel' : ''}`;
+      b.textContent = `📍 ${lvl.name}`;
+      b.style.width = 'auto';
+      b.style.height = 'auto';
+      b.style.fontSize = '13px';
+      b.style.padding = '10px 14px';
+      b.style.whiteSpace = 'nowrap';
+      b.addEventListener('click', () => {
+        if (selectedLevel === lvl.id) return;
+        selectedLevel = lvl.id;
+        onClickSound?.();
+        renderLevelRow();
+        updateLevelDesc();
+      });
+      levelRow.appendChild(b);
+    }
+  }
+  renderLevelRow();
+  updateLevelDesc();
 
   nameInput.value = profile.name;
   nameInput.addEventListener('input', () => {
@@ -98,7 +172,7 @@ export function createMenu(uiRoot, profile, { onPlayLocal, onPlayOnline, onPlayL
 
   el.querySelector('.play-btn').addEventListener('click', () => {
     onClickSound?.();
-    onPlayLocal();
+    onPlayLocal(selectedMode, selectedLevel);
   });
   el.querySelector('.btn-duel').addEventListener('click', () => {
     onClickSound?.();

@@ -38,6 +38,8 @@ import {
   integrateBody, collideBodies, applyImpulse, blastKick, invMass,
 } from './physics.js';
 
+const HIT_CREDIT = 5; // seconds a recent attacker stays eligible for the kill credit
+
 const EMPTY_INPUT = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, run: 0, throw: false, grab: false, punch: false, jump: false };
 
 export function createSim({ level, mode, config }) {
@@ -88,6 +90,7 @@ export function addPlayer(sim, { name, team, bot = false, cos }) {
     hp: sim.config.player.hp,
     state: 'alive', respawn: 0, invuln: sim.config.player.invulnTime,
     knockT: 0,
+    lastHitBy: null, lastHitByT: 0,
     carryFlag: null, heldBomb: null, heldPlayer: null, heldBy: null,
     heldT: 9, throwT: 0, punchCd: 0, punchT: 0, punchArm: 0,
     jumpCd: 0, impactCd: 0, gearSpd: 0, koT: 0, hurtT: 0, spd: 0,
@@ -165,6 +168,8 @@ function updatePlayer(sim, p, i, dt, frozen) {
   p.impactCd = Math.max(0, p.impactCd - dt);
   p.invuln = Math.max(0, p.invuln - dt);
   p.hurtT = Math.max(0, p.hurtT - dt);
+  p.lastHitByT = Math.max(0, p.lastHitByT - dt);
+  if (p.lastHitByT <= 0) p.lastHitBy = null;
   p.heldT += dt;
 
   const onGround = p.y <= 0.001;
@@ -402,7 +407,7 @@ function doPunch(sim, p, i) {
     emit(sim, { t: 'punch', id: p.id, x: p.x, z: p.z });
     if (holder && holder.state === 'alive') {
       const dmg = cfg.dmgBase * 1.5;
-      damagePlayer(sim, holder, dmg, 0, 0, 0, 'punch');
+      damagePlayer(sim, holder, dmg, 0, 0, 0, 'punch', p.id);
       emit(sim, { t: 'punchHit', id: p.id, target: holder.id, x: holder.x, z: holder.z, dmg: Math.round(dmg) });
     }
     return;
@@ -454,7 +459,7 @@ function resolvePunch(sim, p) {
     const kx = dir.x * 0.7 + rad.x * 0.3;
     const kz = dir.z * 0.7 + rad.z * 0.3;
     const dv = dmg * cfg.kbPerDmg;
-    damagePlayer(sim, o, dmg, kx * dv, kz * dv, dv * cfg.liftFrac, 'punch');
+    damagePlayer(sim, o, dmg, kx * dv, kz * dv, dv * cfg.liftFrac, 'punch', p.id);
     emit(sim, { t: 'punchHit', id: p.id, target: o.id, x: o.x, z: o.z, dmg: Math.round(dmg) });
     if (hits.size === 1) {
       // recoil on the first contact only (BombSquad kick_back)
@@ -698,6 +703,7 @@ function explode(sim, b) {
       nz * cfg.blastDvXZ * t,
       cfg.blastDvY * t,
       'bomb',
+      b.owner ?? null,
     );
   }
 
@@ -718,8 +724,11 @@ function explode(sim, b) {
 // rules: ANY damage drops whatever the target is holding, and a single hit
 // past the knockout threshold puts them out cold — an unconscious ragdoll
 // that wakes up with its remaining hp.
-export function damagePlayer(sim, p, dmg, dvx, dvz, dvy, cause) {
+export function damagePlayer(sim, p, dmg, dvx, dvz, dvy, cause, by = null) {
   if (p.state !== 'alive' || p.invuln > 0) return;
+  // credit a real hit to its source (never self; env/self impacts pass by=null
+  // and must PRESERVE whoever last hit us, so a shove-off-the-edge gets credited)
+  if (by && by !== p.id) { p.lastHitBy = by; p.lastHitByT = HIT_CREDIT; }
   p.hp -= dmg;
   p.hurtT = 1.0; // brief hit-flash window (no regen — damage is permanent)
   p.vx += dvx;
@@ -778,6 +787,8 @@ function respawnPlayer(sim, p) {
   p.impactCd = 0;
   p.jumpCd = 0;
   p.koT = 0;
+  p.lastHitBy = null;
+  p.lastHitByT = 0;
   emit(sim, { t: 'spawn', id: p.id, team: p.team, x: p.x, z: p.z });
 }
 
@@ -812,6 +823,7 @@ export function resetRound(sim) {
     p.heldT = 9;
     p.throwT = 0; p.punchCd = 0; p.punchT = 0; p.hurtT = 0;
     p.jumpCd = 0; p.impactCd = 0;
+    p.lastHitBy = null; p.lastHitByT = 0;
     p.invuln = sim.config.player.invulnTime;
     placeAtSpawn(sim, p);
   }

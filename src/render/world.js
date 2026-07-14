@@ -88,6 +88,8 @@ export class World {
     }
 
     if (view.flags) {
+      this.flagViews.red.setVisible(true);
+      this.flagViews.blue.setVisible(true);
       this.trailAcc += dt;
       const spark = this.trailAcc > 0.09;
       if (spark) this.trailAcc = 0;
@@ -98,6 +100,9 @@ export class World {
           this.effects.sparkle(f.x, f.y, f.z);
         }
       }
+    } else {
+      this.flagViews.red.setVisible(false);
+      this.flagViews.blue.setVisible(false);
     }
 
     this.effects.update(dt);
