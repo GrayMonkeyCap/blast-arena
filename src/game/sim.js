@@ -46,6 +46,8 @@ import {
   integrateBody, collideBodies, applyImpulse, blastKick, invMass,
 } from './physics.js';
 
+const HIT_CREDIT = 5; // seconds a recent attacker stays eligible for the kill credit
+
 const EMPTY_INPUT = { mx: 0, mz: 0, ax: 0, az: 0, ad: 7, run: 0, throw: false, grab: false, punch: false, jump: false };
 
 export function createSim({ level, mode, config }) {
@@ -100,6 +102,7 @@ export function addPlayer(sim, { name, team, bot = false, cos }) {
     hp: sim.config.player.hp,
     state: 'alive', respawn: 0, invuln: sim.config.player.invulnTime,
     knockT: 0,
+    lastHitBy: null, lastHitByT: 0,
     carryFlag: null, heldBomb: null, heldPlayer: null, heldBy: null,
     heldT: 9, throwT: 0, punchCd: 0, punchT: 0, punchArm: 0,
     jumpCd: 0, impactCd: 0, gearSpd: 0, koT: 0, hurtT: 0, spd: 0,
@@ -182,6 +185,8 @@ function updatePlayer(sim, p, i, dt, paused) {
   p.impactCd = Math.max(0, p.impactCd - dt);
   p.invuln = Math.max(0, p.invuln - dt);
   p.hurtT = Math.max(0, p.hurtT - dt);
+  p.lastHitByT = Math.max(0, p.lastHitByT - dt);
+  if (p.lastHitByT <= 0) p.lastHitBy = null;
   p.heldT += dt;
 
   // carried powerups wear off (spaz.py POWERUP_WEAR_OFF_TIME, 20s)
@@ -457,7 +462,7 @@ function doPunch(sim, p, i) {
     emit(sim, { t: 'punch', id: p.id, x: p.x, z: p.z });
     if (holder && holder.state === 'alive') {
       const dmg = cfg.dmgBase * 1.5 * power;
-      damagePlayer(sim, holder, dmg, 0, 0, 0, 'punch');
+      damagePlayer(sim, holder, dmg, 0, 0, 0, 'punch', p.id);
       emit(sim, { t: 'punchHit', id: p.id, target: holder.id, x: holder.x, z: holder.z, dmg: Math.round(dmg) });
     }
     return;
@@ -511,7 +516,7 @@ function resolvePunch(sim, p) {
     const kx = dir.x * 0.7 + rad.x * 0.3;
     const kz = dir.z * 0.7 + rad.z * 0.3;
     const dv = dmg * cfg.kbPerDmg;
-    damagePlayer(sim, o, dmg, kx * dv, kz * dv, dv * cfg.liftFrac, 'punch');
+    damagePlayer(sim, o, dmg, kx * dv, kz * dv, dv * cfg.liftFrac, 'punch', p.id);
     emit(sim, { t: 'punchHit', id: p.id, target: o.id, x: o.x, z: o.z, dmg: Math.round(dmg) });
     if (hits.size === 1) {
       // recoil on the first contact only (BombSquad kick_back)
@@ -793,14 +798,16 @@ function explode(sim, b) {
     const p = getP(sim, b.holder);
     if (p) p.heldBomb = null;
   }
-  detonate(sim, b.x, b.z, Math.max(0, b.y), b.kind ?? 'normal');
+  detonate(sim, b.x, b.z, Math.max(0, b.y), b.kind ?? 'normal', b.owner ?? null);
 }
 
 // One blast, any source — bombs of every kind and the curse. Per-kind
 // radius/damage/kick multipliers live in config.bomb.kinds; ice blasts
 // additionally FREEZE whoever they reach (damage lands first, exactly as
-// BombSquad's Blast sends HitMessage then FreezeMessage).
-export function detonate(sim, x, z, y, kind) {
+// BombSquad's Blast sends HitMessage then FreezeMessage). `by` (the
+// attacker id for kill attribution) is optional — bombs pass their owner,
+// the curse's self-detonation leaves it null (no one else did this to you).
+export function detonate(sim, x, z, y, kind, by = null) {
   const cfg = sim.config.bomb;
   const k = cfg.kinds[kind] ?? cfg.kinds.normal;
   const s = sim.state;
@@ -830,6 +837,7 @@ export function detonate(sim, x, z, y, kind) {
       nz * cfg.blastDvXZ * k.dvMult * t,
       cfg.blastDvY * k.dvMult * t,
       'bomb',
+      by,
     );
     if (k.freezes) freezePlayer(sim, p);
   }
@@ -991,8 +999,11 @@ function freezePlayer(sim, p) {
 // that wakes up with its remaining hp. A shield eats hits FIRST — damage
 // and knockback both — and only the breaking hit's overshoot beyond the
 // spillover threshold reaches the player (spaz.py / spazfactory.py).
-export function damagePlayer(sim, p, dmg, dvx, dvz, dvy, cause) {
+export function damagePlayer(sim, p, dmg, dvx, dvz, dvy, cause, by = null) {
   if (p.state !== 'alive' || p.invuln > 0) return;
+  // credit a real hit to its source (never self; env/self impacts pass by=null
+  // and must PRESERVE whoever last hit us, so a shove-off-the-edge gets credited)
+  if (by && by !== p.id) { p.lastHitBy = by; p.lastHitByT = HIT_CREDIT; }
   if (p.shieldHp > 0 && dmg > 0) {
     const spill = sim.config.powerups.shield.spillover;
     p.shieldHp -= dmg;
@@ -1085,6 +1096,8 @@ function respawnPlayer(sim, p) {
   p.impactCd = 0;
   p.jumpCd = 0;
   p.koT = 0;
+  p.lastHitBy = null;
+  p.lastHitByT = 0;
   clearPowerups(sim, p);
   emit(sim, { t: 'spawn', id: p.id, team: p.team, x: p.x, z: p.z });
 }
@@ -1123,6 +1136,7 @@ export function resetRound(sim) {
     p.heldT = 9;
     p.throwT = 0; p.punchCd = 0; p.punchT = 0; p.hurtT = 0;
     p.jumpCd = 0; p.impactCd = 0;
+    p.lastHitBy = null; p.lastHitByT = 0;
     p.invuln = sim.config.player.invulnTime;
     clearPowerups(sim, p);
     placeAtSpawn(sim, p);

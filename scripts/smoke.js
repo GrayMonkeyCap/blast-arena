@@ -165,4 +165,33 @@ if (!seen.powerup) throw new Error('nobody ever picked up a powerup');
   if (back > 1.5) throw new Error('doll never walked back to its post');
 }
 
+// --- death match: bots-only brawl, frags must accrue, no flags in play
+{
+  const dm = new GameHost({ modeId: 'deathmatch', teamSize: 2 });
+  dm.fillBots();
+  const dmSeen = {};
+  for (let i = 0; i < 60 * 120; i++) {
+    dm.step(1 / 60);
+    for (const ev of dm.drainEvents()) dmSeen[ev.t] = (dmSeen[ev.t] ?? 0) + 1;
+  }
+  console.log('death match:', dmSeen, 'scores', dm.sim.state.scores);
+  if (!dmSeen.frag) throw new Error('death match: no frags happened');
+  if (dm.sim.state.flags !== null) throw new Error('death match: flags should be null');
+}
+
+// --- skyhaven: death match on the new arena — bots must fight, level+mode wired right
+{
+  const sky = new GameHost({ levelId: 'skyhaven', modeId: 'deathmatch', teamSize: 2 });
+  sky.fillBots();
+  const tally = {};
+  for (let i = 0; i < 60 * 60; i++) {
+    sky.step(1 / 60);
+    for (const ev of sky.drainEvents()) tally[ev.t] = (tally[ev.t] ?? 0) + 1;
+  }
+  console.log('skyhaven death match:', tally, 'scores', sky.sim.state.scores);
+  if (sky.sim.level.id !== 'skyhaven') throw new Error('skyhaven: wrong level loaded');
+  if (sky.sim.state.flags !== null) throw new Error('skyhaven DM: flags should be null');
+  if (!tally.frag && !tally.explode) throw new Error('skyhaven DM: nothing happened');
+}
+
 console.log('SMOKE OK');

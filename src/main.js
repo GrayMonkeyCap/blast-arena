@@ -40,7 +40,7 @@ let match = null;
 
 const menu = createMenu(uiRoot, profile, {
   onClickSound: () => { sfx.unlock(); sfx.play('click'); },
-  onPlayLocal: () => startMatch(createLocalGame({ profile })),
+  onPlayLocal: (modeId, levelId) => startMatch(createLocalGame({ profile, modeId, levelId })),
   onPlayLab: (variant) => startMatch(createLocalGame({
     profile,
     levelId: 'dojo',

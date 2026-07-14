@@ -45,6 +45,14 @@ respawn timing.
 **In flight** (🔨): powerup system (`task_887dc988`, running now) — boxing
 gloves, shield, health, curse, and the special-bomb types below.
 
+**Landed since**: **Death Match** (§2a) — team kills, first to
+`killsToWin × largest-team-size` wins. This also added **kill attribution**
+to the sim core (`player.lastHitBy`/`lastHitByT`: attacker id threaded
+through punches and bombs, preserved through falls so a shove-off-the-edge
+credits the shover) — a primitive DeathMatch, and later modes
+(Elimination, Chosen One), build on. Selectable from a new menu mode
+picker; flag UI hides itself for flag-less modes.
+
 ---
 
 ## 1. Complete the item / combat system
@@ -85,7 +93,7 @@ bot-wave system + campaign scaffolding).
 ### 2a. Versus — team & free-for-all
 | Mode | Core rule | Source | State |
 |---|---|---|---|
-| Death Match | most kills / kills-to-win | `deathmatch.py` | ⬜ |
+| Death Match | team kills, first to `killsToWin × team size` | `deathmatch.py` | ✅ |
 | Capture the Flag | two-flag, done | `capturetheflag.py` | ✅ |
 | Team Flag / Keep Away | hold the neutral flag to bank time | `keepaway.py` | ⬜ |
 | King of the Hill | hold the zone to bank time | `kingofthehill.py` | ⬜ |
@@ -147,8 +155,13 @@ the **collision layout and play flow**, art can be stylized.
 | Courtyard | melee, keep_away, team_flag | ⬜ |
 | Rampage | melee, keep_away, team_flag | ⬜ |
 
-(We currently ship Foundry Court + the Dojo lab level — keep both as
-originals or retire them once the canon set exists.)
+(We currently ship three originals: Foundry Court (CTF), the Dojo lab
+level, and **Skyhaven** — a floating-island Death Match arena (central
+plaza + ruins/garden/cliffs/watchtower zones, instanced modular props,
+cloud-sea backdrop). These are originals, not part of the canon 17; keep
+or retire them once the canon set exists. Skyhaven also proved out the
+extended prop renderer — `render/props.js` (reusable low-poly, instanced
+builders) + new solid `kind`s and decor types — which the canon maps reuse.)
 
 Map data BombSquad attaches that our level format needs to grow:
 **per-map spawn/flag/scoring-zone sets keyed by mode**, **map-specific
