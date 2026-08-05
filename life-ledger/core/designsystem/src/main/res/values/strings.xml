@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Generic action labels reused by atoms that ship their own defaults
+         (LlConfirmDialog, LlErrorState, LlSearchBar) so screens don't have to
+         pass the same word in on every call site. -->
+    <string name="ll_action_confirm">Confirm</string>
+    <string name="ll_action_cancel">Cancel</string>
+    <string name="ll_action_retry">Retry</string>
+    <string name="ll_action_clear">Clear</string>
+
+    <string name="ll_search_placeholder">Search</string>
+    <string name="ll_search_clear_cd">Clear search</string>
+    <string name="ll_search_cd">Search</string>
+
+    <string name="ll_back_cd">Back</string>
+    <string name="ll_close_cd">Close</string>
+    <string name="ll_loading_cd">Loading</string>
+    <string name="ll_refreshing_cd">Refreshing</string>
+</resources>
