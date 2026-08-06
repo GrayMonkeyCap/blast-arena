@@ -32,7 +32,7 @@ val LifeLedgerTypography = Typography(
  * Tabular-figure style for every money column: [FontFeatureSettings] `"tnum"` fixes digit
  * width so a list of amounts lines up on its decimal point instead of jittering per-row.
  */
-val LifeLedgerTypography.numeric: TextStyle
+val Typography.numeric: TextStyle
     get() = TextStyle(
         fontFamily = LlFontFamily,
         fontWeight = FontWeight.Medium,

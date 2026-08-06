@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A ledger line with an ascending trail of entries: the app's whole idea is that small
+  recorded moments accumulate into a history worth reading.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F3E9D2"
+        android:pathData="M34,30h40a4,4 0,0 1,4 4v40a4,4 0,0 1,-4 4h-40a4,4 0,0 1,-4 -4v-40a4,4 0,0 1,4 -4z" />
+    <path
+        android:fillColor="#1F3A2E"
+        android:pathData="M40,40h28v4h-28z" />
+    <path
+        android:fillColor="#1F3A2E"
+        android:pathData="M40,50h20v4h-20z" />
+    <path
+        android:fillColor="#C6743B"
+        android:pathData="M40,60h12v4h-12z" />
+    <path
+        android:fillColor="#1F3A2E"
+        android:pathData="M40,68h24v3h-24z" />
+</vector>

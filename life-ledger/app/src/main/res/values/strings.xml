@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Life Ledger</string>
+
+    <string name="channel_bills">Bill reminders</string>
+    <string name="channel_bills_description">Local reminders before a detected bill is due.</string>
+    <string name="channel_insights">Insights</string>
+    <string name="channel_insights_description">Occasional observations about your spending and habits.</string>
+    <string name="channel_ingestion">Background processing</string>
+    <string name="channel_ingestion_description">Shown while messages are being imported for the first time.</string>
+
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_timeline">Timeline</string>
+    <string name="nav_money">Money</string>
+    <string name="nav_insights">Insights</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="lock_title">Life Ledger is locked</string>
+    <string name="lock_subtitle">Unlock to see your timeline</string>
+    <string name="lock_unlock">Unlock</string>
+    <string name="lock_biometric_title">Unlock Life Ledger</string>
+    <string name="lock_biometric_subtitle">Use your fingerprint or face to continue</string>
+
+    <string name="permission_title">Read your messages, on this device only</string>
+    <string name="permission_body">Life Ledger builds your timeline by reading the bank and service messages already on your phone. Nothing is uploaded — the app has no internet permission at all.</string>
+    <string name="permission_grant">Grant access</string>
+    <string name="permission_skip">Not now</string>
+    <string name="permission_denied_body">Without message access, Life Ledger can still show anything you import from a file.</string>
+</resources>
