@@ -4,9 +4,6 @@ import com.lifeledger.core.model.TxnCategory
 import java.time.DayOfWeek
 import java.time.Instant
 
-/** Which colour scheme the app follows. [SYSTEM] tracks the OS day/night setting. */
-enum class AppTheme { SYSTEM, LIGHT, DARK }
-
 /**
  * A single immutable snapshot of every user-configurable setting in Life Ledger.
  *
@@ -17,7 +14,7 @@ enum class AppTheme { SYSTEM, LIGHT, DARK }
  */
 data class UserPreferences(
     // --- Appearance ---------------------------------------------------------------------
-    val theme: AppTheme = AppTheme.SYSTEM,
+    val theme: Theme = Theme.SYSTEM,
     val dynamicColor: Boolean = true,
 
     // --- App lock / security -------------------------------------------------------------
@@ -59,6 +56,9 @@ data class UserPreferences(
     val lastInsightRunAt: Instant? = null,
     val lastBackupAt: Instant? = null,
 ) {
+    /** Which colour scheme the app follows. [SYSTEM] tracks the OS day/night setting. */
+    enum class Theme { SYSTEM, LIGHT, DARK }
+
     companion object {
         const val DEFAULT_AUTO_LOCK_TIMEOUT_SECONDS = 60
     }
