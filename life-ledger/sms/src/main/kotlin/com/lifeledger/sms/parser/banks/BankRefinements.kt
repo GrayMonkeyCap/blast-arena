@@ -230,7 +230,7 @@ internal object BankRefinements {
         }
         var vpaFallback: String? = null
         for (segment in segments) {
-            val candidate = segment.trim().trim('.', ',', ';', ':', '*', '#')
+            val candidate = dropLeadingRailTokens(segment.trim().trim('.', ',', ';', ':', '*', '#'))
             if (candidate.length < 2 || candidate.length > 45) continue
             val lower = candidate.lowercase()
             if (candidate.none(Char::isLetter)) continue
