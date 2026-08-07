@@ -1,28 +1,24 @@
 package com.lifeledger.sms.parser.banks
 
+import com.lifeledger.core.model.Direction
 import com.lifeledger.core.model.ParsedTransaction
 import com.lifeledger.core.model.ParserInfo
 import com.lifeledger.core.model.PaymentMethod
 import com.lifeledger.core.model.SmsRecord
 import com.lifeledger.sms.api.ParserContext
-import com.lifeledger.sms.lex.Lexicon
 import com.lifeledger.sms.parser.BaseBankParser
 import javax.inject.Inject
 
 /**
  * Kotak Mahindra Bank alerts.
  *
- * Kotak states the direction with a bare verb — `Sent Rs.150.00 from Kotak Bank AC X1234 to
- * swiggy@ybl`, `Received Rs.2,000.00 in your Kotak Bank AC X1234 from rajesh@okhdfcbank` —
- * rather than the "debited/credited" the rest of the industry uses. `Received` happens to be
- * in the shared credit vocabulary; `Sent` is only there in its longer `sent to` form, so the
- * direction is re-derived here from the opening clause and the semantic type re-derived from
- * that direction.
+ * Kotak states direction with `Sent` and `Received` rather than `debited` and `credited`.
+ * The shared lexicon knows neither word — deliberately, because "sent" appears in plenty of
+ * non-financial messages — so without this refinement every Kotak UPI alert would be
+ * rejected for having no direction at all.
  *
- * Kotak also identifies counterparties almost exclusively by VPA. The VPA is kept as the raw
- * merchant when nothing better exists, because it is what the merchant resolver has to work
- * with — but it is recorded as [ParsedTransaction.upiId] too, which is the field the resolver
- * actually indexes.
+ * Kotak also names the counterparty as a bare VPA with no label, and glues its account
+ * number to the word `AC` (`Kotak Bank AC X1234`).
  */
 class KotakParser @Inject constructor() : BaseBankParser() {
 
@@ -30,93 +26,72 @@ class KotakParser @Inject constructor() : BaseBankParser() {
         id = "kotak.v1",
         displayName = "Kotak Mahindra Bank",
         version = 1,
-        senderCodes = setOf("KOTAKB", "KMBANK", "KOTAK"),
+        senderCodes = setOf("KOTAKB", "KMBANK", "KOTAK", "KMBLTD"),
         priority = 10,
-        description = "Kotak Mahindra Bank account, UPI and card alerts, including the Sent/Received UPI wording.",
+        description = "Kotak account and UPI alerts, including the Sent/Received direction wording.",
     )
 
     override val bankCode = "KOTAK"
 
-    private enum class Template(val bonus: Float) {
-        UPI_SENT(0.12f),
-        UPI_RECEIVED(0.12f),
-        CARD_SPEND(0.12f),
-        ACCOUNT_MOVE(0.1f),
-        HOUSE_STYLE(0.04f),
-        NONE(0f),
+    override fun confidenceBonus(sms: SmsRecord): Float {
+        val body = sms.body.lowercase()
+        return when {
+            SENT_FROM.containsMatchIn(sms.body) || RECEIVED_IN.containsMatchIn(sms.body) -> 0.12f
+            body.contains("kotak bank") || body.contains("-kotak") -> 0.06f
+            else -> 0f
+        }
     }
-
-    override fun confidenceBonus(sms: SmsRecord): Float = template(sms.body).bonus
 
     override fun refine(
         draft: ParsedTransaction,
         sms: SmsRecord,
         context: ParserContext,
-    ): ParsedTransaction? = runCatching { correct(draft, sms.body) }.getOrElse { draft }
+    ): ParsedTransaction {
+        val body = sms.body
+        var refined = draft
 
-    private fun template(body: String): Template {
-        val lower = body.lowercase()
-        return when {
-            SENT.containsMatchIn(body) -> Template.UPI_SENT
-            RECEIVED.containsMatchIn(body) -> Template.UPI_RECEIVED
-            lower.contains("card") && lower.contains("spent") -> Template.CARD_SPEND
-            lower.contains("debited") || lower.contains("credited") -> Template.ACCOUNT_MOVE
-            lower.contains("kotak") -> Template.HOUSE_STYLE
-            else -> Template.NONE
+        when {
+            SENT_FROM.containsMatchIn(body) -> refined = refined.copy(direction = Direction.DEBIT)
+            RECEIVED_IN.containsMatchIn(body) -> refined = refined.copy(direction = Direction.CREDIT)
         }
+
+        KOTAK_ACCOUNT.find(body)?.let { match ->
+            refined = refined.copy(maskedAccount = "XX${match.groupValues[1]}")
+        }
+
+        counterparty(body)?.let { name ->
+            refined = refined.copy(rawMerchant = name)
+        }
+
+        // A bare VPA in the counterparty slot is unambiguous evidence of the rail, and
+        // Kotak's UPI alerts never say "UPI" in prose.
+        if (refined.upiId != null) {
+            refined = refined.copy(paymentMethod = PaymentMethod.UPI)
+        }
+
+        return refined
     }
 
-    private fun correct(draft: ParsedTransaction, body: String): ParsedTransaction? {
-        BankRefinements.rejectionReason(body)?.let { return null }
-
-        val template = template(body)
-        val direction = BankRefinements.directionFromSentReceived(body) ?: draft.direction
-        val vpa = draft.upiId ?: BankRefinements.vpaCounterparty(body)
-
-        val merchant = BankRefinements.stripTrailingNoise(draft.rawMerchant)
-            ?.takeUnless { BankRefinements.isSelfReference(it, "kotak") }
-            ?: vpa
-
-        val method = when {
-            template == Template.CARD_SPEND -> cardMethod(body)
-            template == Template.UPI_SENT || template == Template.UPI_RECEIVED -> PaymentMethod.UPI
-            draft.paymentMethod == PaymentMethod.UNKNOWN && vpa != null -> PaymentMethod.UPI
-            else -> draft.paymentMethod
+    /**
+     * Reads whatever sits after `to` / `from`, stopping at the date or reference clause.
+     * Preferring the VPA when one is present avoids reporting a display name that changes
+     * between messages for the same payee.
+     */
+    private fun counterparty(body: String): String? {
+        COUNTERPARTY.find(body)?.let { match ->
+            val candidate = match.groupValues[1].trim().trim('.', ',', '-')
+            if (candidate.length >= 2 && candidate.any(Char::isLetter)) return candidate
         }
-
-        val reference = draft.referenceNumber ?: BankRefinements.referenceNumber(body)
-
-        return draft.copy(
-            direction = direction,
-            // Re-derived rather than copied: the generic type was decided against a
-            // direction that may have been wrong for exactly these two templates.
-            type = if (direction == draft.direction) draft.type else Lexicon.transactionType(body, direction),
-            paymentMethod = method,
-            rawMerchant = merchant,
-            upiId = vpa,
-            referenceNumber = reference,
-            transactionId = draft.transactionId ?: reference,
-            balanceAfter = draft.balanceAfter?.takeIf { BankRefinements.statesRealBalance(body) },
-        ).withParserFields(
-            template = template.name,
-            extra = BankRefinements.availableLimit(body)
-                ?.let { mapOf("availableLimit" to it.minor.toString()) }
-                ?: emptyMap(),
-        )
-    }
-
-    private fun cardMethod(body: String): PaymentMethod {
-        val lower = body.lowercase()
-        return when {
-            lower.contains("credit card") -> PaymentMethod.CARD_CREDIT
-            lower.contains("debit card") -> PaymentMethod.CARD_DEBIT
-            BankRefinements.availableLimit(body) != null -> PaymentMethod.CARD_CREDIT
-            else -> PaymentMethod.CARD_DEBIT
-        }
+        return null
     }
 
     private companion object {
-        val SENT = Regex("""(?:^|\b)(?:amt\s+)?sent\s*(?:rs\.?|inr|₹)""", RegexOption.IGNORE_CASE)
-        val RECEIVED = Regex("""(?:^|\b)received\s*(?:rs\.?|inr|₹)""", RegexOption.IGNORE_CASE)
+        val SENT_FROM = Regex("""\bsent\s+(?:rs\.?|inr|₹)""", RegexOption.IGNORE_CASE)
+        val RECEIVED_IN = Regex("""\breceived\s+(?:rs\.?|inr|₹)""", RegexOption.IGNORE_CASE)
+        val KOTAK_ACCOUNT = Regex("""\bac\s*x*(\d{3,6})""", RegexOption.IGNORE_CASE)
+        val COUNTERPARTY = Regex(
+            """\b(?:to|from)\s+(.{2,60}?)(?:\s+on\b|\s+upi\b|\s+ref\b|[.;\n]|$)""",
+            RegexOption.IGNORE_CASE,
+        )
     }
 }
